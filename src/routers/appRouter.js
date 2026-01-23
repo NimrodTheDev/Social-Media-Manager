@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const { isAuthenticated } = require('../utils/tokenStorage');
 
 // GET / → render homepage with connect button or tweet form
 // Also handles OAuth callback if code parameter is present
@@ -14,19 +13,12 @@ router.get('/', async (req, res) => {
   }
 
   // Normal homepage rendering
-  if (isAuthenticated()) {
-    // User is authenticated - show tweet form
-    res.render('index', { 
-      authenticated: true,
-      message: req.query.message || null 
-    });
-  } else {
-    // User not authenticated - show connect button
-    res.render('index', { 
-      authenticated: false, 
-      message: req.query.message || null
-    });
-  }
+  // Authentication state is now determined client-side via localStorage
+  // We always render the page and let JavaScript handle showing the form or connect button
+  res.render('index', { 
+    message: req.query.message || null,
+    token: req.query.token || null // Pass token to client if present in URL
+  });
 });
 
 module.exports = router;

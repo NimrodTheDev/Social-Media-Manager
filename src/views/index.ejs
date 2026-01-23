@@ -84,15 +84,18 @@
             <div class="message"><%= message %></div>
         <% } %>
 
-        <% if (!authenticated) { %>
+        <div id="auth-section">
             <!-- Not authenticated - show connect button -->
             <p>Connect your X account to start posting tweets.</p>
             <a href="/auth/x" class="btn">Connect X Account</a>
-        <% } else { %>
+        </div>
+
+        <div id="tweet-section" style="display: none;">
             <!-- Authenticated - show tweet form -->
             <p>Your X account is connected. Post a tweet below:</p>
             
-            <form action="/post" method="POST">
+            <form id="tweetForm" action="/post" method="POST">
+                <input type="hidden" id="accessTokenInput" name="accessToken" value="">
                 <div class="form-group">
                     <label for="tweetText">Tweet Text:</label>
                     <textarea 
@@ -106,10 +109,51 @@
                 </div>
                 <button type="submit" class="btn">Post Tweet</button>
             </form>
-        <% } %>
+        </div>
     </div>
 
     <script>
+        // Token storage key
+        const TOKEN_KEY = 'x_access_token';
+
+        // Check if token is in URL (from OAuth callback)
+        <% if (token) { %>
+        const urlToken = '<%= token %>';
+        if (urlToken) {
+            // Store token in localStorage
+            localStorage.setItem(TOKEN_KEY, urlToken);
+            // Remove token from URL for security
+            const url = new URL(window.location);
+            url.searchParams.delete('token');
+            window.history.replaceState({}, '', url);
+        }
+        <% } %>
+
+        // Check authentication status from localStorage
+        function checkAuth() {
+            const token = localStorage.getItem(TOKEN_KEY);
+            const authSection = document.getElementById('auth-section');
+            const tweetSection = document.getElementById('tweet-section');
+            const accessTokenInput = document.getElementById('accessTokenInput');
+
+            if (token) {
+                // User is authenticated - show tweet form
+                authSection.style.display = 'none';
+                tweetSection.style.display = 'block';
+                // Set token in hidden input field for form submission
+                if (accessTokenInput) {
+                    accessTokenInput.value = token;
+                }
+            } else {
+                // User not authenticated - show connect button
+                authSection.style.display = 'block';
+                tweetSection.style.display = 'none';
+            }
+        }
+
+        // Initialize auth check on page load
+        checkAuth();
+
         // Character counter for tweet textarea
         const textarea = document.getElementById('tweetText');
         const charCount = document.getElementById('charCount');
