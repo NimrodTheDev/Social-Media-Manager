@@ -55,9 +55,16 @@ router.get('/auth/callback', async (req, res) => {
     });
   }
 
+  if (!X_CLIENT_ID || !X_CLIENT_SECRET || !X_REDIRECT_URI) {
+    return res.render('error', { 
+      message: 'X API credentials not configured. Please set X_CLIENT_ID, X_CLIENT_SECRET, and X_REDIRECT_URI environment variables.' 
+    });
+  }
+
   try {
     // Exchange authorization code for access token
     // Note: X API v2 OAuth 2.0 requires Basic Auth with client_id:client_secret
+    // When using Basic Auth, do NOT include client_id in the request body
     const credentials = Buffer.from(`${X_CLIENT_ID}:${X_CLIENT_SECRET}`).toString('base64');
     
     const tokenResponse = await axios.post(
@@ -65,7 +72,6 @@ router.get('/auth/callback', async (req, res) => {
       new URLSearchParams({
         code: code,
         grant_type: 'authorization_code',
-        client_id: X_CLIENT_ID,
         redirect_uri: X_REDIRECT_URI,
         code_verifier: 'challenge' // Should match code_challenge from auth step
       }),
@@ -83,9 +89,20 @@ router.get('/auth/callback', async (req, res) => {
     // Redirect to homepage with success message
     res.redirect('/?message=Account connected successfully!');
   } catch (error) {
-    console.error('Token exchange error:', error.response?.data || error.message);
+    console.error('Token exchange error:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      message: error.message
+    });
+    
+    const errorMessage = error.response?.data?.error_description 
+      || error.response?.data?.error 
+      || error.message 
+      || 'Unknown error occurred';
+    
     res.render('error', { 
-      message: `Failed to exchange authorization code: ${error.response?.data?.error_description || error.message}` 
+      message: `Failed to exchange authorization code: ${errorMessage}` 
     });
   }
 });
