@@ -1,7 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-const { setAccessToken, getAccessToken } = require('../utils/tokenStorage');
 
 // OAuth 2.0 Configuration
 const X_CLIENT_ID = process.env.X_CLIENT_ID;
@@ -83,11 +82,12 @@ router.get('/auth/callback', async (req, res) => {
       }
     );
 
-    // Store access token in memory
-    setAccessToken(tokenResponse.data.access_token);
+    // Get access token from response
+    const accessToken = tokenResponse.data.access_token;
 
-    // Redirect to homepage with success message
-    res.redirect('/?message=Account connected successfully!');
+    // Redirect to homepage with token in query parameter
+    // Client-side JavaScript will store it in localStorage and remove it from URL
+    res.redirect(`/?token=${encodeURIComponent(accessToken)}&message=Account connected successfully!`);
   } catch (error) {
     console.error('Token exchange error:', {
       status: error.response?.status,
@@ -109,7 +109,7 @@ router.get('/auth/callback', async (req, res) => {
 
 // POST /post → submit tweet text from form and post it to X
 router.post('/post', async (req, res) => {
-  const { tweetText } = req.body;
+  const { tweetText, accessToken } = req.body;
 
   if (!tweetText || tweetText.trim().length === 0) {
     return res.render('error', { 
@@ -117,8 +117,8 @@ router.post('/post', async (req, res) => {
     });
   }
 
-  // Get access token from shared storage
-  const token = getAccessToken();
+  // Get access token from request body (sent from client localStorage)
+  const token = accessToken;
 
   if (!token) {
     return res.render('error', { 
