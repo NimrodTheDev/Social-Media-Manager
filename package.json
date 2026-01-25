@@ -20,6 +20,7 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "node src/app.js",
-    "migrate": "node src/db/migrate.js"
+    "migrate": "node src/db/migrate.js",
+    "setup": "npm run migrate && npm start"
   }
 }
