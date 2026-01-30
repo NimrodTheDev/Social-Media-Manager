@@ -28,22 +28,14 @@ async function executeMigration(filename) {
   const filePath = path.join(__dirname, 'migrations', filename);
   const sql = await readFile(filePath, 'utf8');
   
-  // Split by semicolons and filter out empty statements
-  const statements = sql
-    .split(';')
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
-  
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     
-    // Execute each statement
-    for (const statement of statements) {
-      if (statement.trim()) {
-        await client.query(statement);
-      }
-    }
+    // Execute the entire SQL file as one query
+    // PostgreSQL can handle multiple statements separated by semicolons
+    // This avoids issues with dollar-quoted strings in functions
+    await client.query(sql);
     
     // Record migration
     await client.query(
