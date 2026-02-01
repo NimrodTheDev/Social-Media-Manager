@@ -65,8 +65,8 @@ FROM x_accounts;
 -- Add new generic columns
 ALTER TABLE posts 
 ADD COLUMN account_id INTEGER REFERENCES social_accounts(id) ON DELETE CASCADE,
-ADD COLUMN platform_post_id VARCHAR(255), -- Generic: x_tweet_id, instagram_post_id, etc.
-ADD COLUMN platform platform_type; -- Track which platform this post is for
+ADD COLUMN platform_post_id VARCHAR(255); -- Generic: x_tweet_id, instagram_post_id, etc.
+-- Note: Platform is determined from social_accounts.platform when posting, not stored on post
 
 -- Migrate data: link posts to social_accounts
 -- Handle x_tweet_id column (may not exist if migration 002 wasn't run)
@@ -80,7 +80,6 @@ BEGIN
         UPDATE posts p
         SET 
             account_id = sa.id,
-            platform = 'x'::platform_type,
             platform_post_id = p.x_tweet_id
         FROM x_accounts xa
         JOIN social_accounts sa ON sa.user_id = xa.user_id AND sa.platform = 'x'
@@ -90,7 +89,6 @@ BEGIN
         UPDATE posts p
         SET 
             account_id = sa.id,
-            platform = 'x'::platform_type,
             platform_post_id = NULL
         FROM x_accounts xa
         JOIN social_accounts sa ON sa.user_id = xa.user_id AND sa.platform = 'x'
@@ -100,8 +98,7 @@ END $$;
 
 -- Make account_id NOT NULL after migration
 ALTER TABLE posts 
-ALTER COLUMN account_id SET NOT NULL,
-ALTER COLUMN platform SET NOT NULL;
+ALTER COLUMN account_id SET NOT NULL;
 
 -- Drop old foreign key constraint and columns
 -- Handle case where columns might not exist
@@ -146,7 +143,6 @@ END $$;
 
 -- Add new indexes
 CREATE INDEX idx_posts_account_id ON posts(account_id);
-CREATE INDEX idx_posts_platform ON posts(platform);
 CREATE INDEX idx_posts_platform_post_id ON posts(platform_post_id) WHERE platform_post_id IS NOT NULL;
 
 -- Drop old index
