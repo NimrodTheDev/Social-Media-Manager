@@ -207,4 +207,70 @@ router.post('/post', async (req, res) => {
   }
 });
 
+// GET /api/user → get authenticated user's data
+router.get('/api/user', async (req, res) => {
+  const { accessToken } = req.query;
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const pool = require('../db/config');
+  const { getUserFromToken } = require('../utils/userHelpers');
+
+  try {
+    const user = await getUserFromToken(accessToken);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Get user's post statistics
+    const statsResult = await pool.query(
+      `SELECT 
+        COUNT(*) as total_posts,
+        COUNT(*) FILTER (WHERE status = 'posted') as posted_count,
+        COUNT(*) FILTER (WHERE status = 'draft') as draft_count,
+        COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled_count,
+        COUNT(*) FILTER (WHERE status = 'failed') as failed_count
+      FROM posts
+      WHERE x_account_id = $1`,
+      [user.x_account_id]
+    );
+
+    const stats = statsResult.rows[0] || {
+      total_posts: 0,
+      posted_count: 0,
+      draft_count: 0,
+      scheduled_count: 0,
+      failed_count: 0
+    };
+
+    // Return user data with statistics
+    res.json({
+      user: {
+        id: user.user_id,
+        name: user.user_name,
+        email: user.email,
+        created_at: user.user_created_at,
+        x_account: {
+          id: user.x_account_id,
+          username: user.x_username,
+          x_user_id: user.x_user_id
+        },
+        stats: {
+          total: parseInt(stats.total_posts),
+          posted: parseInt(stats.posted_count),
+          draft: parseInt(stats.draft_count),
+          scheduled: parseInt(stats.scheduled_count),
+          failed: parseInt(stats.failed_count)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user data:', error);
+    res.status(500).json({ error: 'Failed to fetch user data' });
+  }
+});
+
 module.exports = router;
