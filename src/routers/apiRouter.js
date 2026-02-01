@@ -95,8 +95,8 @@ router.get('/auth/callback', async (req, res) => {
 
     // Check if X account already exists
     const existingAccount = await pool.query(
-      'SELECT user_id FROM x_accounts WHERE x_user_id = $1',
-      [xUser.id]
+      'SELECT user_id FROM social_accounts WHERE platform = $1 AND platform_user_id = $2',
+      ['x', xUser.id]
     );
 
     let userId;
@@ -106,15 +106,15 @@ router.get('/auth/callback', async (req, res) => {
       userId = existingAccount.rows[0].user_id;
       
       await pool.query(
-        `UPDATE x_accounts 
+        `UPDATE social_accounts 
          SET access_token = $1, 
              refresh_token = $2,
              token_expires_at = $3,
-             x_username = $4,
+             platform_username = $4,
              is_active = true,
              updated_at = NOW()
-         WHERE x_user_id = $5`,
-        [accessToken, refreshToken, expiresAt, xUser.username, xUser.id]
+         WHERE platform = $5 AND platform_user_id = $6`,
+        [accessToken, refreshToken, expiresAt, xUser.username, 'x', xUser.id]
       );
     } else {
       // New account - create user and X account
@@ -125,10 +125,10 @@ router.get('/auth/callback', async (req, res) => {
       userId = userResult.rows[0].id;
       
       await pool.query(
-        `INSERT INTO x_accounts 
-         (user_id, access_token, refresh_token, token_expires_at, x_user_id, x_username)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [userId, accessToken, refreshToken, expiresAt, xUser.id, xUser.username]
+        `INSERT INTO social_accounts 
+         (user_id, platform, access_token, refresh_token, token_expires_at, platform_user_id, platform_username)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [userId, 'x', accessToken, refreshToken, expiresAt, xUser.id, xUser.username]
       );
     }
 
@@ -211,9 +211,9 @@ router.post('/post', async (req, res) => {
     // Save post to database
     await pool.query(
       `INSERT INTO posts 
-       (x_account_id, content, status, posted_at, x_tweet_id)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [user.x_account_id, tweetText.trim(), 'posted', postedAt, tweetId]
+       (account_id, platform, content, status, posted_at, platform_post_id)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [user.account_id, 'x', tweetText.trim(), 'posted', postedAt, tweetId]
     );
 
     // Success - render success page
@@ -241,10 +241,11 @@ router.post('/post', async (req, res) => {
       if (user) {
         await pool.query(
           `INSERT INTO posts 
-           (x_account_id, content, status, error_message)
-           VALUES ($1, $2, $3, $4)`,
+           (account_id, platform, content, status, error_message)
+           VALUES ($1, $2, $3, $4, $5)`,
           [
-            user.x_account_id, 
+            user.account_id, 
+            'x',
             tweetText.trim(), 
             'failed', 
             error.response?.data?.detail || error.message
@@ -288,8 +289,8 @@ router.get('/api/user', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled_count,
         COUNT(*) FILTER (WHERE status = 'failed') as failed_count
       FROM posts
-      WHERE x_account_id = $1`,
-      [user.x_account_id]
+      WHERE account_id = $1`,
+      [user.account_id]
     );
 
     const stats = statsResult.rows[0] || {
@@ -308,9 +309,9 @@ router.get('/api/user', async (req, res) => {
         email: user.email,
         created_at: user.user_created_at,
         x_account: {
-          id: user.x_account_id,
-          username: user.x_username,
-          x_user_id: user.x_user_id
+          id: user.account_id,
+          username: user.platform_username,
+          x_user_id: user.platform_user_id
         },
         stats: {
           total: parseInt(stats.total_posts),
@@ -350,20 +351,37 @@ router.get('/api/posts', async (req, res) => {
       `SELECT 
         p.id,
         p.content,
+        p.mode,
+        p.thread,
+        p.reply_to_id,
+        p.quote_tweet_id,
+        p.media,
         p.status,
         p.scheduled_at,
         p.posted_at,
-        p.x_tweet_id,
+        p.platform_post_id,
+        p.platform_thread_ids,
         p.error_message,
         p.created_at,
         p.updated_at
       FROM posts p
-      WHERE p.x_account_id = $1
+      WHERE p.account_id = $1 AND p.platform = $2
       ORDER BY p.created_at DESC`,
-      [user.x_account_id]
+      [user.account_id, 'x']
     );
 
-    res.json({ posts: result.rows });
+    // Parse JSON fields
+    const posts = result.rows.map(post => ({
+      ...post,
+      thread: post.thread ? JSON.parse(post.thread) : null,
+      media: post.media ? JSON.parse(post.media) : null,
+      platform_thread_ids: post.platform_thread_ids ? JSON.parse(post.platform_thread_ids) : null,
+      // Backward compatibility
+      x_tweet_id: post.platform_post_id,
+      x_thread_ids: post.platform_thread_ids ? JSON.parse(post.platform_thread_ids) : null
+    }));
+
+    res.json({ posts: posts });
   } catch (error) {
     console.error('Error fetching posts:', error);
     res.status(500).json({ error: 'Failed to fetch posts' });
@@ -372,18 +390,73 @@ router.get('/api/posts', async (req, res) => {
 
 // POST /api/posts → create a new post and store it in database (as draft)
 router.post('/api/posts', async (req, res) => {
-  const { content, accessToken, scheduledAt } = req.body;
+  const { 
+    text, 
+    mode = 'single', 
+    thread, 
+    replyToId, 
+    quoteTweetId, 
+    media, 
+    accessToken, 
+    scheduledAt 
+  } = req.body;
 
   if (!accessToken) {
     return res.status(401).json({ error: 'Access token required' });
   }
 
-  if (!content || content.trim().length === 0) {
-    return res.status(400).json({ error: 'Post content cannot be empty' });
+  // Validate mode
+  if (!['single', 'thread', 'reply', 'quote'].includes(mode)) {
+    return res.status(400).json({ error: 'Invalid mode. Must be: single, thread, reply, or quote' });
   }
 
-  if (content.length > 280) {
-    return res.status(400).json({ error: 'Post content exceeds 280 characters' });
+  // Validate content based on mode
+  if (mode === 'single') {
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Post text cannot be empty' });
+    }
+    if (text.length > 280) {
+      return res.status(400).json({ error: 'Post text exceeds 280 characters' });
+    }
+  } else if (mode === 'thread') {
+    if (!thread || !Array.isArray(thread) || thread.length < 2) {
+      return res.status(400).json({ error: 'Thread must have at least 2 tweets' });
+    }
+    // Validate each thread tweet
+    for (let i = 0; i < thread.length; i++) {
+      if (!thread[i] || thread[i].trim().length === 0) {
+        return res.status(400).json({ error: `Thread tweet ${i + 1} cannot be empty` });
+      }
+      if (thread[i].length > 280) {
+        return res.status(400).json({ error: `Thread tweet ${i + 1} exceeds 280 characters` });
+      }
+    }
+  } else if (mode === 'reply') {
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Reply text cannot be empty' });
+    }
+    if (text.length > 280) {
+      return res.status(400).json({ error: 'Reply text exceeds 280 characters' });
+    }
+    if (!replyToId) {
+      return res.status(400).json({ error: 'replyToId is required for reply mode' });
+    }
+  } else if (mode === 'quote') {
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Quote text cannot be empty' });
+    }
+    if (text.length > 280) {
+      return res.status(400).json({ error: 'Quote text exceeds 280 characters' });
+    }
+    if (!quoteTweetId) {
+      return res.status(400).json({ error: 'quoteTweetId is required for quote mode' });
+    }
+  }
+
+  // Validate media if provided
+  if (media && Array.isArray(media)) {
+    // Media validation can be added here (check types, sizes, etc.)
+    // For now, just ensure it's an array
   }
 
   const pool = require('../db/config');
@@ -412,13 +485,30 @@ router.post('/api/posts', async (req, res) => {
       scheduled_at = scheduledDate;
     }
 
+    // Prepare data for database
+    // For single mode, use text as content
+    // For thread mode, use first tweet as content, store rest in thread JSONB
+    const content = mode === 'thread' ? thread[0] : (text || '');
+    const threadData = mode === 'thread' ? JSON.stringify(thread) : null;
+
     // Create post in database
     const result = await pool.query(
       `INSERT INTO posts 
-       (x_account_id, content, status, scheduled_at)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, content, status, scheduled_at, created_at, updated_at`,
-      [user.x_account_id, content.trim(), status, scheduled_at]
+       (account_id, platform, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at, created_at, updated_at`,
+      [
+        user.account_id,
+        'x',
+        content.trim(), 
+        mode,
+        threadData,
+        replyToId || null,
+        quoteTweetId || null,
+        media ? JSON.stringify(media) : null,
+        status, 
+        scheduled_at
+      ]
     );
 
     const post = result.rows[0];
@@ -427,7 +517,12 @@ router.post('/api/posts', async (req, res) => {
       success: true,
       post: {
         id: post.id,
-        content: post.content,
+        text: post.content,
+        mode: post.mode,
+        thread: post.thread ? JSON.parse(post.thread) : null,
+        reply_to_id: post.reply_to_id,
+        quote_tweet_id: post.quote_tweet_id,
+        media: post.media ? JSON.parse(post.media) : null,
         status: post.status,
         scheduled_at: post.scheduled_at,
         created_at: post.created_at,
@@ -465,8 +560,8 @@ router.post('/api/posts/:id/post', async (req, res) => {
     // Get the post
     const postResult = await pool.query(
       `SELECT * FROM posts 
-       WHERE id = $1 AND x_account_id = $2`,
-      [id, user.x_account_id]
+       WHERE id = $1 AND account_id = $2 AND platform = $3`,
+      [id, user.account_id, 'x']
     );
 
     if (postResult.rows.length === 0) {
@@ -479,38 +574,123 @@ router.post('/api/posts/:id/post', async (req, res) => {
       return res.status(400).json({ error: 'Post already published' });
     }
 
-    // Post to X API
-    const tweetResponse = await axios.post(
-      `${X_API_BASE}/tweets`,
-      {
-        text: post.content
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const tweetId = tweetResponse.data.data.id;
+    // Post to X API based on mode
+    let tweetId;
+    let threadIds = null;
     const postedAt = new Date();
+
+    if (post.mode === 'single') {
+      // Single tweet
+      const tweetResponse = await axios.post(
+        `${X_API_BASE}/tweets`,
+        {
+          text: post.content,
+          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      tweetId = tweetResponse.data.data.id;
+    } else if (post.mode === 'thread') {
+      // Thread - post first tweet, then reply to it for subsequent tweets
+      const thread = JSON.parse(post.thread);
+      const tweetIds = [];
+      
+      // Post first tweet
+      const firstTweetResponse = await axios.post(
+        `${X_API_BASE}/tweets`,
+        {
+          text: thread[0],
+          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      tweetIds.push(firstTweetResponse.data.data.id);
+      
+      // Post subsequent tweets as replies
+      let inReplyToId = firstTweetResponse.data.data.id;
+      for (let i = 1; i < thread.length; i++) {
+        const replyResponse = await axios.post(
+          `${X_API_BASE}/tweets`,
+          {
+            text: thread[i],
+            reply: { in_reply_to_tweet_id: inReplyToId }
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        tweetIds.push(replyResponse.data.data.id);
+        inReplyToId = replyResponse.data.data.id;
+      }
+      
+      tweetId = tweetIds[0]; // First tweet ID
+      threadIds = JSON.stringify(tweetIds);
+    } else if (post.mode === 'reply') {
+      // Reply tweet
+      const replyResponse = await axios.post(
+        `${X_API_BASE}/tweets`,
+        {
+          text: post.content,
+          reply: { in_reply_to_tweet_id: post.reply_to_id },
+          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      tweetId = replyResponse.data.data.id;
+    } else if (post.mode === 'quote') {
+      // Quote tweet
+      const quoteResponse = await axios.post(
+        `${X_API_BASE}/tweets`,
+        {
+          text: post.content,
+          quote_tweet_id: post.quote_tweet_id,
+          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      tweetId = quoteResponse.data.data.id;
+    }
 
     // Update post in database
     await pool.query(
       `UPDATE posts 
        SET status = 'posted',
            posted_at = $1,
-           x_tweet_id = $2,
+           platform_post_id = $2,
+           platform_thread_ids = $3,
            error_message = NULL,
            updated_at = NOW()
-       WHERE id = $3`,
-      [postedAt, tweetId, id]
+       WHERE id = $4`,
+      [postedAt, tweetId, threadIds, id]
     );
 
     res.json({ 
       success: true, 
       tweetId: tweetId,
+      threadIds: threadIds ? JSON.parse(threadIds) : null,
       message: 'Post published successfully' 
     });
   } catch (error) {

@@ -261,6 +261,83 @@
         .schedule-input.active {
             display: block;
         }
+        .mode-selector {
+            margin-bottom: 20px;
+        }
+        .mode-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .mode-selector select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .mode-specific-fields {
+            margin-top: 16px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            display: none;
+        }
+        .mode-specific-fields.active {
+            display: block;
+        }
+        .thread-item {
+            margin-bottom: 12px;
+        }
+        .thread-item label {
+            font-size: 12px;
+            color: #657786;
+        }
+        .thread-item textarea {
+            min-height: 80px;
+        }
+        .add-thread-btn {
+            background: #657786;
+            margin-top: 8px;
+        }
+        .add-thread-btn:hover {
+            background: #4a5568;
+        }
+        .remove-thread-btn {
+            background: #dc3545;
+            padding: 4px 8px;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+        .remove-thread-btn:hover {
+            background: #c82333;
+        }
+        .input-group {
+            margin-bottom: 12px;
+        }
+        .input-group label {
+            font-size: 12px;
+            color: #657786;
+            margin-bottom: 4px;
+        }
+        .input-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .mode-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-left: 8px;
+        }
     </style>
 </head>
 <body>
@@ -287,19 +364,84 @@
             <div style="margin-top: 24px;">
                 <h2 style="margin-top: 0;">Create New Post</h2>
                 <form id="createPostForm">
-                    <div class="form-group">
-                        <label for="postContent">Post Content:</label>
+                    <!-- Mode Selector -->
+                    <div class="mode-selector">
+                        <label for="postMode">Post Type:</label>
+                        <select id="postMode" name="mode" required>
+                            <option value="single">Single Tweet</option>
+                            <option value="thread">Thread</option>
+                            <option value="reply">Reply</option>
+                            <option value="quote">Quote Tweet</option>
+                        </select>
+                    </div>
+
+                    <!-- Single Tweet / Reply / Quote Content -->
+                    <div id="singleContent" class="form-group">
+                        <label for="postText">Tweet Text:</label>
                         <textarea 
-                            id="postContent" 
-                            name="content" 
+                            id="postText" 
+                            name="text" 
                             maxlength="280" 
                             placeholder="What's happening?"
-                            required
                         ></textarea>
                         <div class="char-count" id="charCount">0 / 280</div>
                     </div>
+
+                    <!-- Thread Content -->
+                    <div id="threadContent" class="mode-specific-fields">
+                        <label style="margin-bottom: 12px; display: block; font-weight: 500;">Thread Tweets:</label>
+                        <div id="threadItems">
+                            <div class="thread-item">
+                                <label>Tweet 1:</label>
+                                <textarea class="thread-tweet" maxlength="280" placeholder="First tweet..."></textarea>
+                                <div class="char-count">0 / 280</div>
+                            </div>
+                            <div class="thread-item">
+                                <label>Tweet 2:</label>
+                                <textarea class="thread-tweet" maxlength="280" placeholder="Second tweet..."></textarea>
+                                <div class="char-count">0 / 280</div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-small add-thread-btn" onclick="addThreadItem()">+ Add Tweet</button>
+                    </div>
+
+                    <!-- Reply Mode Fields -->
+                    <div id="replyFields" class="mode-specific-fields">
+                        <div class="input-group">
+                            <label for="replyToId">Reply to Tweet ID:</label>
+                            <input 
+                                type="text" 
+                                id="replyToId" 
+                                name="replyToId" 
+                                placeholder="1234567890"
+                            >
+                            <small style="color: #657786; font-size: 11px;">Enter the X tweet ID you're replying to</small>
+                        </div>
+                    </div>
+
+                    <!-- Quote Mode Fields -->
+                    <div id="quoteFields" class="mode-specific-fields">
+                        <div class="input-group">
+                            <label for="quoteTweetId">Quote Tweet ID:</label>
+                            <input 
+                                type="text" 
+                                id="quoteTweetId" 
+                                name="quoteTweetId" 
+                                placeholder="1234567890"
+                            >
+                            <small style="color: #657786; font-size: 11px;">Enter the X tweet ID you're quoting</small>
+                        </div>
+                    </div>
+
+                    <!-- Media (placeholder for future implementation) -->
+                    <div class="form-group" style="margin-top: 16px;">
+                        <label>Media (Coming Soon)</label>
+                        <input type="file" disabled style="opacity: 0.5;">
+                        <small style="color: #657786; font-size: 11px;">Media upload will be available soon</small>
+                    </div>
                     
-                    <div class="checkbox-group">
+                    <!-- Scheduling -->
+                    <div class="checkbox-group" style="margin-top: 16px;">
                         <input type="checkbox" id="schedulePost" name="schedule">
                         <label for="schedulePost" style="margin: 0; font-weight: normal;">Schedule for later</label>
                     </div>
@@ -471,16 +613,41 @@
                     return;
                 }
 
-                postsList.innerHTML = data.posts.map(post => `
+                postsList.innerHTML = data.posts.map(post => {
+                    // Determine display content based on mode
+                    let displayContent = '';
+                    if (post.mode === 'thread' && post.thread && Array.isArray(post.thread)) {
+                        displayContent = post.thread.map((tweet, idx) => 
+                            `<div style="margin-bottom: 8px; padding: 8px; background: rgba(0,0,0,0.05); border-radius: 4px;">
+                                <strong>Tweet ${idx + 1}:</strong> ${escapeHtml(tweet)}
+                            </div>`
+                        ).join('');
+                    } else {
+                        displayContent = escapeHtml(post.content || '');
+                    }
+
+                    // Mode badge
+                    const modeLabels = {
+                        'single': 'Single',
+                        'thread': 'Thread',
+                        'reply': 'Reply',
+                        'quote': 'Quote'
+                    };
+
+                    return `
                     <div class="post-item" data-post-id="${post.id}">
                         <div class="post-content-wrapper">
-                            <p class="post-text">${escapeHtml(post.content)}</p>
+                            <p class="post-text">${displayContent}</p>
                             <div class="post-meta">
                                 <span class="post-status ${post.status}">${post.status}</span>
+                                <span class="mode-badge">${modeLabels[post.mode] || post.mode}</span>
+                                ${post.reply_to_id ? `<span>Reply to: ${post.reply_to_id}</span>` : ''}
+                                ${post.quote_tweet_id ? `<span>Quote: ${post.quote_tweet_id}</span>` : ''}
                                 ${post.posted_at ? `<span>Posted: ${formatDate(post.posted_at)}</span>` : ''}
                                 ${post.scheduled_at ? `<span>Scheduled: ${formatDate(post.scheduled_at)}</span>` : ''}
                                 ${post.created_at ? `<span>Created: ${formatDate(post.created_at)}</span>` : ''}
-                                ${post.x_tweet_id ? `<span><a href="https://twitter.com/i/web/status/${post.x_tweet_id}" target="_blank" style="color: #1da1f2;">View on X</a></span>` : ''}
+                                ${(post.platform_post_id || post.x_tweet_id) ? `<span><a href="https://twitter.com/i/web/status/${post.platform_post_id || post.x_tweet_id}" target="_blank" style="color: #1da1f2;">View on X</a></span>` : ''}
+                                ${(post.platform_thread_ids || post.x_thread_ids) && (post.platform_thread_ids || post.x_thread_ids).length > 0 ? `<span><a href="https://twitter.com/i/web/status/${(post.platform_thread_ids || post.x_thread_ids)[0]}" target="_blank" style="color: #1da1f2;">View Thread</a></span>` : ''}
                                 ${post.error_message ? `<span class="error-message">Error: ${escapeHtml(post.error_message.substring(0, 100))}</span>` : ''}
                             </div>
                         </div>
@@ -494,7 +661,8 @@
                             `}
                         </div>
                     </div>
-                `).join('');
+                `;
+                }).join('');
             } catch (error) {
                 console.error('Error loading posts:', error);
                 postsList.innerHTML = `<p style="color: #d32f2f;">Error loading posts: ${error.message}</p>`;
@@ -553,7 +721,7 @@
         }
 
         // Create a new draft post
-        async function createPost(content, scheduledAt = null) {
+        async function createPost(postData) {
             const token = localStorage.getItem(TOKEN_KEY);
             if (!token) {
                 handleTokenFailure();
@@ -561,21 +729,12 @@
             }
 
             try {
-                const body = {
-                    content: content.trim(),
-                    accessToken: token
-                };
-
-                if (scheduledAt) {
-                    body.scheduledAt = scheduledAt;
-                }
-
                 const response = await fetch('/api/posts', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(postData)
                 });
 
                 const data = await response.json();
@@ -623,6 +782,93 @@
             return div.innerHTML;
         }
 
+        // Handle mode switching
+        const postModeSelect = document.getElementById('postMode');
+        const singleContent = document.getElementById('singleContent');
+        const threadContent = document.getElementById('threadContent');
+        const replyFields = document.getElementById('replyFields');
+        const quoteFields = document.getElementById('quoteFields');
+
+        function updateModeFields() {
+            const mode = postModeSelect.value;
+            
+            // Hide all mode-specific fields
+            singleContent.style.display = 'none';
+            threadContent.classList.remove('active');
+            replyFields.classList.remove('active');
+            quoteFields.classList.remove('active');
+            
+            // Show relevant fields based on mode
+            if (mode === 'single') {
+                singleContent.style.display = 'block';
+                document.getElementById('postText').required = true;
+            } else if (mode === 'thread') {
+                singleContent.style.display = 'none';
+                threadContent.classList.add('active');
+                document.getElementById('postText').required = false;
+            } else if (mode === 'reply') {
+                singleContent.style.display = 'block';
+                replyFields.classList.add('active');
+                document.getElementById('postText').required = true;
+                document.getElementById('replyToId').required = true;
+            } else if (mode === 'quote') {
+                singleContent.style.display = 'block';
+                quoteFields.classList.add('active');
+                document.getElementById('postText').required = true;
+                document.getElementById('quoteTweetId').required = true;
+            }
+        }
+
+        if (postModeSelect) {
+            postModeSelect.addEventListener('change', updateModeFields);
+            updateModeFields(); // Initialize
+        }
+
+        // Thread management
+        function addThreadItem() {
+            const threadItems = document.getElementById('threadItems');
+            const count = threadItems.children.length + 1;
+            const newItem = document.createElement('div');
+            newItem.className = 'thread-item';
+            newItem.innerHTML = `
+                <label>Tweet ${count}:</label>
+                <textarea class="thread-tweet" maxlength="280" placeholder="Tweet ${count}..."></textarea>
+                <div class="char-count">0 / 280</div>
+                <button type="button" class="btn btn-small remove-thread-btn" onclick="removeThreadItem(this)">Remove</button>
+            `;
+            threadItems.appendChild(newItem);
+            
+            // Add character counter
+            const textarea = newItem.querySelector('textarea');
+            const charCount = newItem.querySelector('.char-count');
+            textarea.addEventListener('input', function() {
+                const length = this.value.length;
+                charCount.textContent = `${length} / 280`;
+                if (length > 260) {
+                    charCount.classList.add('warning');
+                } else {
+                    charCount.classList.remove('warning');
+                }
+            });
+        }
+
+        function removeThreadItem(button) {
+            const threadItems = document.getElementById('threadItems');
+            if (threadItems.children.length > 2) {
+                button.closest('.thread-item').remove();
+                // Renumber items
+                Array.from(threadItems.children).forEach((item, index) => {
+                    item.querySelector('label').textContent = `Tweet ${index + 1}:`;
+                });
+            } else {
+                alert('Thread must have at least 2 tweets');
+            }
+        }
+
+        // Make removeThreadItem available globally
+        window.removeThreadItem = removeThreadItem;
+        window.addThreadItem = addThreadItem;
+
         // Handle create post form submission
         const createPostForm = document.getElementById('createPostForm');
         const scheduleCheckbox = document.getElementById('schedulePost');
@@ -657,13 +903,61 @@
                     return;
                 }
 
-                const content = document.getElementById('postContent').value;
+                const mode = postModeSelect.value;
                 const isScheduled = scheduleCheckbox && scheduleCheckbox.checked;
                 const scheduledAt = isScheduled && scheduledAtInput ? scheduledAtInput.value : null;
 
-                if (!content.trim()) {
-                    alert('Please enter post content');
-                    return;
+                // Collect data based on mode
+                let postData = {
+                    mode: mode,
+                    accessToken: token
+                };
+
+                if (mode === 'single') {
+                    const text = document.getElementById('postText').value;
+                    if (!text.trim()) {
+                        alert('Please enter post text');
+                        return;
+                    }
+                    postData.text = text;
+                } else if (mode === 'thread') {
+                    const threadItems = document.querySelectorAll('.thread-tweet');
+                    const thread = Array.from(threadItems).map(item => item.value.trim()).filter(v => v);
+                    if (thread.length < 2) {
+                        alert('Thread must have at least 2 tweets');
+                        return;
+                    }
+                    postData.thread = thread;
+                } else if (mode === 'reply') {
+                    const text = document.getElementById('postText').value;
+                    const replyToId = document.getElementById('replyToId').value.trim();
+                    if (!text.trim()) {
+                        alert('Please enter reply text');
+                        return;
+                    }
+                    if (!replyToId) {
+                        alert('Please enter the tweet ID you\'re replying to');
+                        return;
+                    }
+                    postData.text = text;
+                    postData.replyToId = replyToId;
+                } else if (mode === 'quote') {
+                    const text = document.getElementById('postText').value;
+                    const quoteTweetId = document.getElementById('quoteTweetId').value.trim();
+                    if (!text.trim()) {
+                        alert('Please enter quote text');
+                        return;
+                    }
+                    if (!quoteTweetId) {
+                        alert('Please enter the tweet ID you\'re quoting');
+                        return;
+                    }
+                    postData.text = text;
+                    postData.quoteTweetId = quoteTweetId;
+                }
+
+                if (scheduledAt) {
+                    postData.scheduledAt = new Date(scheduledAt).toISOString();
                 }
 
                 // Disable button and show status
@@ -676,12 +970,30 @@
                 }
 
                 try {
-                    await createPost(content, scheduledAt ? new Date(scheduledAt).toISOString() : null);
+                    await createPost(postData);
                     
                     // Success - clear form and reload posts
                     createPostForm.reset();
                     scheduleInput.classList.remove('active');
+                    updateModeFields(); // Reset to default mode
                     document.getElementById('charCount').textContent = '0 / 280';
+                    
+                    // Reset thread to 2 items
+                    const threadItems = document.getElementById('threadItems');
+                    if (threadItems) {
+                        threadItems.innerHTML = `
+                            <div class="thread-item">
+                                <label>Tweet 1:</label>
+                                <textarea class="thread-tweet" maxlength="280" placeholder="First tweet..."></textarea>
+                                <div class="char-count">0 / 280</div>
+                            </div>
+                            <div class="thread-item">
+                                <label>Tweet 2:</label>
+                                <textarea class="thread-tweet" maxlength="280" placeholder="Second tweet..."></textarea>
+                                <div class="char-count">0 / 280</div>
+                            </div>
+                        `;
+                    }
                     
                     if (createPostStatus) {
                         createPostStatus.textContent = isScheduled ? '✓ Post scheduled!' : '✓ Draft created!';
@@ -721,7 +1033,7 @@
         checkAuth();
 
         // Character counter for post textarea
-        const postTextarea = document.getElementById('postContent');
+        const postTextarea = document.getElementById('postText');
         const charCount = document.getElementById('charCount');
         
         if (postTextarea && charCount) {
@@ -735,6 +1047,25 @@
                 }
             });
         }
+
+        // Character counters for thread items
+        document.addEventListener('DOMContentLoaded', function() {
+            const threadTextareas = document.querySelectorAll('.thread-tweet');
+            threadTextareas.forEach(textarea => {
+                const charCount = textarea.nextElementSibling;
+                if (charCount && charCount.classList.contains('char-count')) {
+                    textarea.addEventListener('input', function() {
+                        const length = this.value.length;
+                        charCount.textContent = `${length} / 280`;
+                        if (length > 260) {
+                            charCount.classList.add('warning');
+                        } else {
+                            charCount.classList.remove('warning');
+                        }
+                    });
+                }
+            });
+        });
 
         // Helper function to format dates
         function formatDate(dateString) {
