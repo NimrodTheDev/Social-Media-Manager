@@ -211,9 +211,9 @@ router.post('/post', async (req, res) => {
     // Save post to database
     await pool.query(
       `INSERT INTO posts 
-       (account_id, platform, content, status, posted_at, platform_post_id)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [user.account_id, 'x', tweetText.trim(), 'posted', postedAt, tweetId]
+       (account_id, content, status, posted_at, platform_post_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user.account_id, tweetText.trim(), 'posted', postedAt, tweetId]
     );
 
     // Success - render success page
@@ -241,11 +241,10 @@ router.post('/post', async (req, res) => {
       if (user) {
         await pool.query(
           `INSERT INTO posts 
-           (account_id, platform, content, status, error_message)
-           VALUES ($1, $2, $3, $4, $5)`,
+           (account_id, content, status, error_message)
+           VALUES ($1, $2, $3, $4)`,
           [
             user.account_id, 
-            'x',
             tweetText.trim(), 
             'failed', 
             error.response?.data?.detail || error.message
@@ -346,7 +345,7 @@ router.get('/api/posts', async (req, res) => {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    // Fetch all posts for this user's X account
+    // Fetch all posts for this user's account (platform determined from account)
     const result = await pool.query(
       `SELECT 
         p.id,
@@ -363,11 +362,13 @@ router.get('/api/posts', async (req, res) => {
         p.platform_thread_ids,
         p.error_message,
         p.created_at,
-        p.updated_at
+        p.updated_at,
+        sa.platform
       FROM posts p
-      WHERE p.account_id = $1 AND p.platform = $2
+      JOIN social_accounts sa ON p.account_id = sa.id
+      WHERE p.account_id = $1
       ORDER BY p.created_at DESC`,
-      [user.account_id, 'x']
+      [user.account_id]
     );
 
     // Parse JSON fields
@@ -491,15 +492,14 @@ router.post('/api/posts', async (req, res) => {
     const content = mode === 'thread' ? thread[0] : (text || '');
     const threadData = mode === 'thread' ? JSON.stringify(thread) : null;
 
-    // Create post in database
+    // Create post in database (platform determined from account when posting)
     const result = await pool.query(
       `INSERT INTO posts 
-       (account_id, platform, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       (account_id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at, created_at, updated_at`,
       [
         user.account_id,
-        'x',
         content.trim(), 
         mode,
         threadData,
@@ -557,11 +557,13 @@ router.post('/api/posts/:id/post', async (req, res) => {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    // Get the post
+    // Get the post with account info to determine platform
     const postResult = await pool.query(
-      `SELECT * FROM posts 
-       WHERE id = $1 AND account_id = $2 AND platform = $3`,
-      [id, user.account_id, 'x']
+      `SELECT p.*, sa.platform
+       FROM posts p
+       JOIN social_accounts sa ON p.account_id = sa.id
+       WHERE p.id = $1 AND p.account_id = $2`,
+      [id, user.account_id]
     );
 
     if (postResult.rows.length === 0) {
