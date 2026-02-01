@@ -2,12 +2,14 @@ const pool = require('../db/config');
 
 /**
  * Get user information from an access token
- * Looks up the token in x_accounts table and returns the associated user
+ * Looks up the token in social_accounts table and returns the associated user
+ * Currently supports X platform, but designed to be platform-agnostic
  * 
  * @param {string} accessToken - OAuth 2.0 access token
+ * @param {string} platform - Platform name (default: 'x')
  * @returns {Promise<Object|null>} User object with account info, or null if not found
  */
-async function getUserFromToken(accessToken) {
+async function getUserFromToken(accessToken, platform = 'x') {
   try {
     const result = await pool.query(
       `SELECT 
@@ -15,17 +17,31 @@ async function getUserFromToken(accessToken) {
         u.name as user_name,
         u.email,
         u.created_at as user_created_at,
-        xa.id as x_account_id,
-        xa.x_user_id,
-        xa.x_username,
-        xa.is_active as account_is_active
+        sa.id as account_id,
+        sa.platform,
+        sa.platform_user_id,
+        sa.platform_username,
+        sa.is_active as account_is_active
       FROM users u
-      JOIN x_accounts xa ON u.id = xa.user_id
-      WHERE xa.access_token = $1 AND xa.is_active = true`,
-      [accessToken]
+      JOIN social_accounts sa ON u.id = sa.user_id
+      WHERE sa.access_token = $1 
+        AND sa.platform = $2 
+        AND sa.is_active = true`,
+      [accessToken, platform]
     );
 
-    return result.rows[0] || null;
+    if (result.rows[0]) {
+      // For backward compatibility, map to old field names
+      const row = result.rows[0];
+      return {
+        ...row,
+        x_account_id: row.account_id, // Backward compat
+        x_user_id: row.platform_user_id, // Backward compat
+        x_username: row.platform_username // Backward compat
+      };
+    }
+
+    return null;
   } catch (error) {
     console.error('Error getting user from token:', error);
     return null;
@@ -33,27 +49,41 @@ async function getUserFromToken(accessToken) {
 }
 
 /**
- * Get X account information from an access token
+ * Get social account information from an access token
+ * 
+ * @param {string} accessToken - OAuth 2.0 access token
+ * @param {string} platform - Platform name (default: 'x')
+ * @returns {Promise<Object|null>} Social account object, or null if not found
+ */
+async function getAccountFromToken(accessToken, platform = 'x') {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM social_accounts 
+       WHERE access_token = $1 
+         AND platform = $2 
+         AND is_active = true`,
+      [accessToken, platform]
+    );
+
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting account from token:', error);
+    return null;
+  }
+}
+
+/**
+ * Get X account information from an access token (backward compatibility)
  * 
  * @param {string} accessToken - OAuth 2.0 access token
  * @returns {Promise<Object|null>} X account object, or null if not found
  */
 async function getXAccountFromToken(accessToken) {
-  try {
-    const result = await pool.query(
-      `SELECT * FROM x_accounts 
-       WHERE access_token = $1 AND is_active = true`,
-      [accessToken]
-    );
-
-    return result.rows[0] || null;
-  } catch (error) {
-    console.error('Error getting X account from token:', error);
-    return null;
-  }
+  return getAccountFromToken(accessToken, 'x');
 }
 
 module.exports = {
   getUserFromToken,
-  getXAccountFromToken
+  getAccountFromToken,
+  getXAccountFromToken // Backward compatibility
 };
