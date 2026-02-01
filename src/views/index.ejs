@@ -143,6 +143,124 @@
             padding: 20px;
             color: #666;
         }
+        .posts-section {
+            margin-top: 40px;
+        }
+        .posts-section h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        .posts-list {
+            margin-top: 20px;
+        }
+        .post-item {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+        .post-content-wrapper {
+            flex: 1;
+        }
+        .post-text {
+            margin: 0 0 8px 0;
+            color: #14171a;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .post-meta {
+            font-size: 12px;
+            color: #657786;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .post-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .post-status.draft {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .post-status.scheduled {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        .post-status.posted {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        .post-status.failed {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+        .post-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .btn-success {
+            background-color: #1da1f2;
+        }
+        .btn-success:hover:not(:disabled) {
+            background-color: #1a91da;
+        }
+        .btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .error-message {
+            color: #d32f2f;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        .loading {
+            text-align: center;
+            color: #657786;
+            padding: 20px;
+        }
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+        .checkbox-group input[type="datetime-local"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .schedule-input {
+            margin-top: 12px;
+            display: none;
+        }
+        .schedule-input.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -168,21 +286,45 @@
             <!-- Authenticated - show tweet form -->
             <div style="margin-top: 24px;">
                 <h2 style="margin-top: 0;">Create New Post</h2>
-                <form id="tweetForm" action="/post" method="POST">
-                    <input type="hidden" id="accessTokenInput" name="accessToken" value="">
+                <form id="createPostForm">
                     <div class="form-group">
-                        <label for="tweetText">Tweet Text:</label>
+                        <label for="postContent">Post Content:</label>
                         <textarea 
-                            id="tweetText" 
-                            name="tweetText" 
+                            id="postContent" 
+                            name="content" 
                             maxlength="280" 
                             placeholder="What's happening?"
                             required
                         ></textarea>
                         <div class="char-count" id="charCount">0 / 280</div>
                     </div>
-                    <button type="submit" class="btn">Post Tweet</button>
+                    
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="schedulePost" name="schedule">
+                        <label for="schedulePost" style="margin: 0; font-weight: normal;">Schedule for later</label>
+                    </div>
+                    
+                    <div class="schedule-input" id="scheduleInput">
+                        <label for="scheduledAt" style="margin-top: 12px; display: block;">Schedule Date & Time:</label>
+                        <input 
+                            type="datetime-local" 
+                            id="scheduledAt" 
+                            name="scheduledAt"
+                            min=""
+                        >
+                    </div>
+                    
+                    <div class="form-actions" style="margin-top: 16px;">
+                        <button type="submit" class="btn" id="createPostBtn">Create Draft</button>
+                        <span id="createPostStatus" style="color: #666; font-size: 14px;"></span>
+                    </div>
                 </form>
+            </div>
+
+            <!-- Posts List -->
+            <div class="posts-section">
+                <h2>Your Posts</h2>
+                <div id="posts-list" class="loading">Loading posts...</div>
             </div>
         </div>
     </div>
@@ -204,6 +346,32 @@
         }
         <% } %>
 
+        // Handle token failure - clear token and show reconnect message
+        function handleTokenFailure() {
+            // Clear invalid token
+            localStorage.removeItem(TOKEN_KEY);
+            
+            // Hide authenticated sections
+            const tweetSection = document.getElementById('tweet-section');
+            const authSection = document.getElementById('auth-section');
+            
+            if (tweetSection) tweetSection.style.display = 'none';
+            if (authSection) {
+                authSection.innerHTML = `
+                    <div style="padding: 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; margin-bottom: 16px;">
+                        <p style="margin: 0 0 12px 0; color: #856404; font-weight: 500;">
+                            ⚠️ Your session has expired or the access token is invalid.
+                        </p>
+                        <p style="margin: 0; color: #856404; font-size: 14px;">
+                            Please reconnect your X account to continue.
+                        </p>
+                    </div>
+                    <a href="/auth/x" class="btn">Reconnect X Account</a>
+                `;
+                authSection.style.display = 'block';
+            }
+        }
+
         // Load user data from API
         async function loadUserData(accessToken) {
             const userHeader = document.getElementById('user-header');
@@ -212,6 +380,13 @@
             try {
                 const response = await fetch(`/api/user?accessToken=${encodeURIComponent(accessToken)}`);
                 const data = await response.json();
+
+                // Check for authentication errors
+                if (response.status === 401) {
+                    console.warn('Token invalid or expired');
+                    handleTokenFailure();
+                    return;
+                }
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to load user data');
@@ -262,8 +437,162 @@
                 userHeader.style.display = 'block';
             } catch (error) {
                 console.error('Error loading user data:', error);
-                userHeader.innerHTML = '<p style="color: rgba(255,255,255,0.9);">Unable to load profile data</p>';
-                userHeader.style.display = 'block';
+                // If it's a network error, don't clear token (might be temporary)
+                if (error.message.includes('Failed to fetch')) {
+                    userHeader.innerHTML = '<p style="color: rgba(255,255,255,0.9);">Unable to load profile data. Please check your connection.</p>';
+                    userHeader.style.display = 'block';
+                } else {
+                    // For other errors, check if it might be auth-related
+                    handleTokenFailure();
+                }
+            }
+        }
+
+        // Load posts from API
+        async function loadPosts(accessToken) {
+            const postsList = document.getElementById('posts-list');
+            if (!postsList) return;
+
+            try {
+                const response = await fetch(`/api/posts?accessToken=${encodeURIComponent(accessToken)}`);
+                const data = await response.json();
+
+                if (response.status === 401) {
+                    handleTokenFailure();
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to load posts');
+                }
+
+                if (data.posts.length === 0) {
+                    postsList.innerHTML = '<p style="color: #657786;">No posts yet. Create your first post above!</p>';
+                    return;
+                }
+
+                postsList.innerHTML = data.posts.map(post => `
+                    <div class="post-item" data-post-id="${post.id}">
+                        <div class="post-content-wrapper">
+                            <p class="post-text">${escapeHtml(post.content)}</p>
+                            <div class="post-meta">
+                                <span class="post-status ${post.status}">${post.status}</span>
+                                ${post.posted_at ? `<span>Posted: ${formatDate(post.posted_at)}</span>` : ''}
+                                ${post.scheduled_at ? `<span>Scheduled: ${formatDate(post.scheduled_at)}</span>` : ''}
+                                ${post.created_at ? `<span>Created: ${formatDate(post.created_at)}</span>` : ''}
+                                ${post.x_tweet_id ? `<span><a href="https://twitter.com/i/web/status/${post.x_tweet_id}" target="_blank" style="color: #1da1f2;">View on X</a></span>` : ''}
+                                ${post.error_message ? `<span class="error-message">Error: ${escapeHtml(post.error_message.substring(0, 100))}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="post-actions">
+                            ${post.status !== 'posted' ? `
+                                <button class="btn btn-small btn-success" onclick="postToX(${post.id})" id="post-btn-${post.id}">
+                                    Post
+                                </button>
+                            ` : `
+                                <button class="btn btn-small" disabled>Posted</button>
+                            `}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading posts:', error);
+                postsList.innerHTML = `<p style="color: #d32f2f;">Error loading posts: ${error.message}</p>`;
+            }
+        }
+
+        // Post a specific post to X
+        async function postToX(postId) {
+            const token = localStorage.getItem(TOKEN_KEY);
+            if (!token) {
+                handleTokenFailure();
+                return;
+            }
+
+            const button = document.getElementById(`post-btn-${postId}`);
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Posting...';
+            }
+
+            try {
+                const response = await fetch(`/api/posts/${postId}/post`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ accessToken: token })
+                });
+
+                const data = await response.json();
+
+                if (response.status === 401) {
+                    handleTokenFailure();
+                    return;
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to post');
+                }
+
+                // Reload posts and user data
+                loadPosts(token);
+                loadUserData(token);
+                
+                // Show success message
+                alert('Post published successfully!');
+            } catch (error) {
+                console.error('Error posting:', error);
+                alert(`Failed to post: ${error.message}`);
+                
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Post';
+                }
+            }
+        }
+
+        // Create a new draft post
+        async function createPost(content, scheduledAt = null) {
+            const token = localStorage.getItem(TOKEN_KEY);
+            if (!token) {
+                handleTokenFailure();
+                return false;
+            }
+
+            try {
+                const body = {
+                    content: content.trim(),
+                    accessToken: token
+                };
+
+                if (scheduledAt) {
+                    body.scheduledAt = scheduledAt;
+                }
+
+                const response = await fetch('/api/posts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (response.status === 401) {
+                    handleTokenFailure();
+                    return false;
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to create post');
+                }
+
+                return true;
+            } catch (error) {
+                console.error('Error creating post:', error);
+                throw error;
             }
         }
 
@@ -272,18 +601,14 @@
             const token = localStorage.getItem(TOKEN_KEY);
             const authSection = document.getElementById('auth-section');
             const tweetSection = document.getElementById('tweet-section');
-            const accessTokenInput = document.getElementById('accessTokenInput');
 
             if (token) {
                 // User is authenticated - show tweet form
                 authSection.style.display = 'none';
                 tweetSection.style.display = 'block';
-                // Set token in hidden input field for form submission
-                if (accessTokenInput) {
-                    accessTokenInput.value = token;
-                }
-                // Load user data
+                // Load user data and posts
                 loadUserData(token);
+                loadPosts(token);
             } else {
                 // User not authenticated - show connect button
                 authSection.style.display = 'block';
@@ -298,15 +623,109 @@
             return div.innerHTML;
         }
 
+        // Handle create post form submission
+        const createPostForm = document.getElementById('createPostForm');
+        const scheduleCheckbox = document.getElementById('schedulePost');
+        const scheduleInput = document.getElementById('scheduleInput');
+        const scheduledAtInput = document.getElementById('scheduledAt');
+        const createPostBtn = document.getElementById('createPostBtn');
+        const createPostStatus = document.getElementById('createPostStatus');
+
+        // Toggle schedule input visibility
+        if (scheduleCheckbox && scheduleInput) {
+            scheduleCheckbox.addEventListener('change', function() {
+                if (this.checked) {
+                    scheduleInput.classList.add('active');
+                    // Set minimum date to now
+                    const now = new Date();
+                    now.setMinutes(now.getMinutes() + 1); // At least 1 minute in future
+                    scheduledAtInput.min = now.toISOString().slice(0, 16);
+                } else {
+                    scheduleInput.classList.remove('active');
+                }
+            });
+        }
+
+        // Handle form submission
+        if (createPostForm) {
+            createPostForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                const token = localStorage.getItem(TOKEN_KEY);
+                if (!token) {
+                    handleTokenFailure();
+                    return;
+                }
+
+                const content = document.getElementById('postContent').value;
+                const isScheduled = scheduleCheckbox && scheduleCheckbox.checked;
+                const scheduledAt = isScheduled && scheduledAtInput ? scheduledAtInput.value : null;
+
+                if (!content.trim()) {
+                    alert('Please enter post content');
+                    return;
+                }
+
+                // Disable button and show status
+                if (createPostBtn) {
+                    createPostBtn.disabled = true;
+                    createPostBtn.textContent = 'Creating...';
+                }
+                if (createPostStatus) {
+                    createPostStatus.textContent = '';
+                }
+
+                try {
+                    await createPost(content, scheduledAt ? new Date(scheduledAt).toISOString() : null);
+                    
+                    // Success - clear form and reload posts
+                    createPostForm.reset();
+                    scheduleInput.classList.remove('active');
+                    document.getElementById('charCount').textContent = '0 / 280';
+                    
+                    if (createPostStatus) {
+                        createPostStatus.textContent = isScheduled ? '✓ Post scheduled!' : '✓ Draft created!';
+                        createPostStatus.style.color = '#388e3c';
+                    }
+                    
+                    // Reload posts and user data
+                    loadPosts(token);
+                    loadUserData(token);
+                    
+                    // Reset button after 2 seconds
+                    setTimeout(() => {
+                        if (createPostBtn) {
+                            createPostBtn.disabled = false;
+                            createPostBtn.textContent = 'Create Draft';
+                        }
+                        if (createPostStatus) {
+                            createPostStatus.textContent = '';
+                        }
+                    }, 2000);
+                } catch (error) {
+                    console.error('Error creating post:', error);
+                    alert(`Failed to create post: ${error.message}`);
+                    
+                    if (createPostBtn) {
+                        createPostBtn.disabled = false;
+                        createPostBtn.textContent = 'Create Draft';
+                    }
+                    if (createPostStatus) {
+                        createPostStatus.textContent = '';
+                    }
+                }
+            });
+        }
+
         // Initialize auth check on page load
         checkAuth();
 
-        // Character counter for tweet textarea
-        const textarea = document.getElementById('tweetText');
+        // Character counter for post textarea
+        const postTextarea = document.getElementById('postContent');
         const charCount = document.getElementById('charCount');
         
-        if (textarea && charCount) {
-            textarea.addEventListener('input', function() {
+        if (postTextarea && charCount) {
+            postTextarea.addEventListener('input', function() {
                 const length = this.value.length;
                 charCount.textContent = `${length} / 280`;
                 if (length > 260) {
@@ -315,6 +734,13 @@
                     charCount.classList.remove('warning');
                 }
             });
+        }
+
+        // Helper function to format dates
+        function formatDate(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return date.toLocaleString();
         }
     </script>
 </body>

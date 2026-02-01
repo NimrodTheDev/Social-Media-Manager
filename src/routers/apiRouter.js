@@ -179,7 +179,18 @@ router.post('/post', async (req, res) => {
     });
   }
 
+  const pool = require('../db/config');
+  const { getUserFromToken } = require('../utils/userHelpers');
+
   try {
+    // Verify token is valid before attempting to post
+    const user = await getUserFromToken(token);
+    if (!user) {
+      return res.render('error', { 
+        message: 'Invalid or expired token. Please reconnect your X account.' 
+      });
+    }
+
     // Post tweet to X API v2
     const tweetResponse = await axios.post(
       `${X_API_BASE}/tweets`,
@@ -194,13 +205,56 @@ router.post('/post', async (req, res) => {
       }
     );
 
+    const tweetId = tweetResponse.data.data.id;
+    const postedAt = new Date();
+
+    // Save post to database
+    await pool.query(
+      `INSERT INTO posts 
+       (x_account_id, content, status, posted_at, x_tweet_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [user.x_account_id, tweetText.trim(), 'posted', postedAt, tweetId]
+    );
+
     // Success - render success page
     res.render('success', { 
-      tweetId: tweetResponse.data.data.id,
+      tweetId: tweetId,
       tweetText: tweetText.trim()
     });
   } catch (error) {
     console.error('Tweet posting error:', error.response?.data || error.message);
+    
+    // Check if it's an authentication error from X API
+    const isAuthError = error.response?.status === 401 || 
+                       error.response?.status === 403 ||
+                       error.response?.data?.title === 'Unauthorized';
+    
+    if (isAuthError) {
+      return res.render('error', { 
+        message: 'Your X account access has expired or been revoked. Please reconnect your account.' 
+      });
+    }
+    
+    // Save failed post to database if we have user info
+    try {
+      const user = await getUserFromToken(token);
+      if (user) {
+        await pool.query(
+          `INSERT INTO posts 
+           (x_account_id, content, status, error_message)
+           VALUES ($1, $2, $3, $4)`,
+          [
+            user.x_account_id, 
+            tweetText.trim(), 
+            'failed', 
+            error.response?.data?.detail || error.message
+          ]
+        );
+      }
+    } catch (dbError) {
+      console.error('Error saving failed post:', dbError);
+    }
+    
     res.render('error', { 
       message: `Failed to post tweet: ${error.response?.data?.detail || error.message}` 
     });
@@ -270,6 +324,216 @@ router.get('/api/user', async (req, res) => {
   } catch (error) {
     console.error('Error fetching user data:', error);
     res.status(500).json({ error: 'Failed to fetch user data' });
+  }
+});
+
+// GET /api/posts → get all posts for authenticated user
+router.get('/api/posts', async (req, res) => {
+  const { accessToken } = req.query;
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const pool = require('../db/config');
+  const { getUserFromToken } = require('../utils/userHelpers');
+
+  try {
+    const user = await getUserFromToken(accessToken);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Fetch all posts for this user's X account
+    const result = await pool.query(
+      `SELECT 
+        p.id,
+        p.content,
+        p.status,
+        p.scheduled_at,
+        p.posted_at,
+        p.x_tweet_id,
+        p.error_message,
+        p.created_at,
+        p.updated_at
+      FROM posts p
+      WHERE p.x_account_id = $1
+      ORDER BY p.created_at DESC`,
+      [user.x_account_id]
+    );
+
+    res.json({ posts: result.rows });
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+// POST /api/posts → create a new post and store it in database (as draft)
+router.post('/api/posts', async (req, res) => {
+  const { content, accessToken, scheduledAt } = req.body;
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  if (!content || content.trim().length === 0) {
+    return res.status(400).json({ error: 'Post content cannot be empty' });
+  }
+
+  if (content.length > 280) {
+    return res.status(400).json({ error: 'Post content exceeds 280 characters' });
+  }
+
+  const pool = require('../db/config');
+  const { getUserFromToken } = require('../utils/userHelpers');
+
+  try {
+    const user = await getUserFromToken(accessToken);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Determine status based on scheduledAt
+    let status = 'draft';
+    let scheduled_at = null;
+
+    if (scheduledAt) {
+      const scheduledDate = new Date(scheduledAt);
+      if (isNaN(scheduledDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid scheduled_at date format' });
+      }
+      if (scheduledDate <= new Date()) {
+        return res.status(400).json({ error: 'Scheduled date must be in the future' });
+      }
+      status = 'scheduled';
+      scheduled_at = scheduledDate;
+    }
+
+    // Create post in database
+    const result = await pool.query(
+      `INSERT INTO posts 
+       (x_account_id, content, status, scheduled_at)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, content, status, scheduled_at, created_at, updated_at`,
+      [user.x_account_id, content.trim(), status, scheduled_at]
+    );
+
+    const post = result.rows[0];
+
+    res.status(201).json({
+      success: true,
+      post: {
+        id: post.id,
+        content: post.content,
+        status: post.status,
+        scheduled_at: post.scheduled_at,
+        created_at: post.created_at,
+        updated_at: post.updated_at
+      },
+      message: status === 'scheduled' 
+        ? 'Post scheduled successfully' 
+        : 'Post created as draft'
+    });
+  } catch (error) {
+    console.error('Error creating post:', error);
+    res.status(500).json({ error: 'Failed to create post' });
+  }
+});
+
+// POST /api/posts/:id/post → post a specific post to X
+router.post('/api/posts/:id/post', async (req, res) => {
+  const { id } = req.params;
+  const { accessToken } = req.body;
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const pool = require('../db/config');
+  const { getUserFromToken } = require('../utils/userHelpers');
+
+  try {
+    const user = await getUserFromToken(accessToken);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Get the post
+    const postResult = await pool.query(
+      `SELECT * FROM posts 
+       WHERE id = $1 AND x_account_id = $2`,
+      [id, user.x_account_id]
+    );
+
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    const post = postResult.rows[0];
+
+    if (post.status === 'posted') {
+      return res.status(400).json({ error: 'Post already published' });
+    }
+
+    // Post to X API
+    const tweetResponse = await axios.post(
+      `${X_API_BASE}/tweets`,
+      {
+        text: post.content
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const tweetId = tweetResponse.data.data.id;
+    const postedAt = new Date();
+
+    // Update post in database
+    await pool.query(
+      `UPDATE posts 
+       SET status = 'posted',
+           posted_at = $1,
+           x_tweet_id = $2,
+           error_message = NULL,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [postedAt, tweetId, id]
+    );
+
+    res.json({ 
+      success: true, 
+      tweetId: tweetId,
+      message: 'Post published successfully' 
+    });
+  } catch (error) {
+    console.error('Error posting tweet:', error.response?.data || error.message);
+    
+    // Update post status to failed
+    try {
+      await pool.query(
+        `UPDATE posts 
+         SET status = 'failed',
+             error_message = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [error.response?.data?.detail || error.message, id]
+      );
+    } catch (dbError) {
+      console.error('Error updating failed post:', dbError);
+    }
+
+    res.status(500).json({ 
+      error: 'Failed to post tweet',
+      message: error.response?.data?.detail || error.message 
+    });
   }
 });
 
