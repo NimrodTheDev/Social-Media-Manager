@@ -569,6 +569,57 @@
                             name="scheduledAt"
                             min=""
                         >
+                        
+                        <!-- Repeat Options -->
+                        <div style="margin-top: 16px;">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="enableRepeat" name="enableRepeat">
+                                <label for="enableRepeat" style="margin: 0; font-weight: normal;">Repeat this post</label>
+                            </div>
+                            
+                            <div id="repeatOptions" style="margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 4px; display: none;">
+                                <div style="margin-bottom: 12px;">
+                                    <label for="repeatFrequency" style="display: block; margin-bottom: 4px; font-size: 12px; color: #657786;">Repeat Frequency:</label>
+                                    <select id="repeatFrequency" name="repeatFrequency" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                        <option value="daily">Daily</option>
+                                        <option value="weekly">Weekly</option>
+                                        <option value="monthly">Monthly</option>
+                                    </select>
+                                </div>
+                                
+                                <div style="margin-bottom: 12px;">
+                                    <label style="display: block; margin-bottom: 4px; font-size: 12px; color: #657786;">End Repeat (Optional):</label>
+                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                        <input type="radio" id="repeatEndDate" name="repeatEnd" value="date" checked>
+                                        <label for="repeatEndDate" style="margin: 0; font-weight: normal; font-size: 12px;">End Date:</label>
+                                        <input 
+                                            type="datetime-local" 
+                                            id="repeatUntil" 
+                                            name="repeatUntil"
+                                            style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;"
+                                        >
+                                    </div>
+                                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
+                                        <input type="radio" id="repeatEndCount" name="repeatEnd" value="count">
+                                        <label for="repeatEndCount" style="margin: 0; font-weight: normal; font-size: 12px;">After</label>
+                                        <input 
+                                            type="number" 
+                                            id="repeatCount" 
+                                            name="repeatCount"
+                                            min="1"
+                                            max="365"
+                                            placeholder="10"
+                                            style="width: 80px; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;"
+                                        >
+                                        <label style="margin: 0; font-weight: normal; font-size: 12px;">times</label>
+                                    </div>
+                                    <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px;">
+                                        <input type="radio" id="repeatEndNever" name="repeatEnd" value="never">
+                                        <label for="repeatEndNever" style="margin: 0; font-weight: normal; font-size: 12px;">Never (repeat indefinitely)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
                             <div class="form-actions" style="margin-top: 16px; display: flex; align-items: center; gap: 12px;">
@@ -763,6 +814,7 @@
                                 ${post.quote_tweet_id ? `<span>Quote: ${post.quote_tweet_id}</span>` : ''}
                                 ${post.posted_at ? `<span>Posted: ${formatDate(post.posted_at)}</span>` : ''}
                                 ${post.scheduled_at ? `<span>Scheduled: ${formatDate(post.scheduled_at)}</span>` : ''}
+                                ${post.repeat_enabled ? `<span style="color: #1da1f2;">🔄 Repeats ${post.repeat_frequency}${post.repeat_until ? ` until ${formatDate(post.repeat_until)}` : ''}${post.repeat_count ? ` (${post.repeat_occurrence || 1}/${post.repeat_count})` : ''}</span>` : ''}
                                 ${post.created_at ? `<span>Created: ${formatDate(post.created_at)}</span>` : ''}
                                 ${(post.platform_post_id || post.x_tweet_id) ? `<span><a href="https://twitter.com/i/web/status/${post.platform_post_id || post.x_tweet_id}" target="_blank" style="color: #1da1f2;">View on X</a></span>` : ''}
                                 ${(post.platform_thread_ids || post.x_thread_ids) && (post.platform_thread_ids || post.x_thread_ids).length > 0 ? `<span><a href="https://twitter.com/i/web/status/${(post.platform_thread_ids || post.x_thread_ids)[0]}" target="_blank" style="color: #1da1f2;">View Thread</a></span>` : ''}
@@ -770,13 +822,26 @@
                             </div>
                         </div>
                         <div class="post-actions">
-                            ${post.status !== 'posted' ? `
+                            ${post.status === 'draft' ? `
                                 <button class="btn btn-small btn-success" onclick="postToX(${post.id})" id="post-btn-${post.id}">
                                     Post
                                 </button>
-                            ` : `
-                                <button class="btn btn-small" disabled>Posted</button>
-                            `}
+                            ` : post.status === 'scheduled' ? `
+                                <button class="btn btn-small btn-success" onclick="postToX(${post.id})" id="post-btn-${post.id}">
+                                    Post Now
+                                </button>
+                                <button class="btn btn-small" style="background: #657786; margin-left: 8px;" onclick="reschedulePost(${post.id})" id="reschedule-btn-${post.id}">
+                                    Reschedule
+                                </button>
+                            ` : post.status === 'posted' ? `
+                                <button class="btn btn-small btn-success" onclick="repostToX(${post.id})" id="repost-btn-${post.id}">
+                                    Repost
+                                </button>
+                            ` : post.status === 'failed' ? `
+                                <button class="btn btn-small btn-success" onclick="postToX(${post.id})" id="post-btn-${post.id}">
+                                    Retry
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -796,6 +861,7 @@
             }
 
             const button = document.getElementById(`post-btn-${postId}`);
+            const originalText = button ? button.textContent : 'Post';
             if (button) {
                 button.disabled = true;
                 button.textContent = 'Posting...';
@@ -833,7 +899,189 @@
                 
                 if (button) {
                     button.disabled = false;
-                    button.textContent = 'Post';
+                    button.textContent = originalText;
+                }
+            }
+        }
+
+        // Repost a previously posted item (creates new post with same content)
+        async function repostToX(postId) {
+            const token = localStorage.getItem(TOKEN_KEY);
+            if (!token) {
+                handleTokenFailure();
+                return;
+            }
+
+            if (!confirm('This will create a new post with the same content. Continue?')) {
+                return;
+            }
+
+            const button = document.getElementById(`repost-btn-${postId}`);
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Reposting...';
+            }
+
+            try {
+                // Get the post details first
+                const getResponse = await fetch(`/api/posts?accessToken=${encodeURIComponent(token)}`);
+                const getData = await getResponse.json();
+                
+                if (!getResponse.ok) {
+                    throw new Error(getData.error || 'Failed to fetch post');
+                }
+
+                const post = getData.posts.find(p => p.id === postId);
+                if (!post) {
+                    throw new Error('Post not found');
+                }
+
+                // Create new post data from existing post
+                const postData = {
+                    mode: post.mode || 'single',
+                    accessToken: token
+                };
+
+                if (post.mode === 'thread' && post.thread) {
+                    postData.thread = post.thread;
+                } else {
+                    postData.text = post.content;
+                }
+
+                if (post.reply_to_id) {
+                    postData.replyToId = post.reply_to_id;
+                }
+                if (post.quote_tweet_id) {
+                    postData.quoteTweetId = post.quote_tweet_id;
+                }
+                if (post.media) {
+                    postData.media = post.media;
+                }
+
+                // Create new draft post
+                const createResponse = await fetch('/api/posts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(postData)
+                });
+
+                const createData = await createResponse.json();
+
+                if (!createResponse.ok) {
+                    throw new Error(createData.error || 'Failed to create repost');
+                }
+
+                // Immediately post the new draft
+                const newPostId = createData.post.id;
+                await postToX(newPostId);
+
+            } catch (error) {
+                console.error('Error reposting:', error);
+                alert(`Failed to repost: ${error.message}`);
+                
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Repost';
+                }
+            }
+        }
+
+        // Reschedule a scheduled post
+        async function reschedulePost(postId) {
+            const token = localStorage.getItem(TOKEN_KEY);
+            if (!token) {
+                handleTokenFailure();
+                return;
+            }
+
+            // Get current scheduled time
+            const getResponse = await fetch(`/api/posts?accessToken=${encodeURIComponent(token)}`);
+            const getData = await getResponse.json();
+            
+            if (!getResponse.ok) {
+                alert('Failed to fetch post details');
+                return;
+            }
+
+            const post = getData.posts.find(p => p.id === postId);
+            if (!post) {
+                alert('Post not found');
+                return;
+            }
+
+            // Get new scheduled time from user using datetime-local input
+            const currentDate = post.scheduled_at ? new Date(post.scheduled_at) : new Date();
+            currentDate.setMinutes(currentDate.getMinutes() + 1); // Default to 1 minute from now
+            
+            // Create a temporary input element for better UX
+            const input = document.createElement('input');
+            input.type = 'datetime-local';
+            input.value = currentDate.toISOString().slice(0, 16);
+            input.min = new Date().toISOString().slice(0, 16);
+            
+            // Show modal-like prompt
+            const newDateStr = prompt('Enter new scheduled date and time:\n(Use format: YYYY-MM-DD HH:MM)', currentDate.toISOString().slice(0, 16).replace('T', ' '));
+            
+            if (!newDateStr) {
+                return; // User cancelled
+            }
+
+            // Parse the date (handle both formats)
+            let newDate;
+            if (newDateStr.includes('T')) {
+                newDate = new Date(newDateStr);
+            } else {
+                // Convert "YYYY-MM-DD HH:MM" to ISO format
+                newDate = new Date(newDateStr.replace(' ', 'T'));
+            }
+
+            if (isNaN(newDate.getTime())) {
+                alert('Invalid date format. Please use YYYY-MM-DD HH:MM');
+                return;
+            }
+
+            if (newDate <= new Date()) {
+                alert('Scheduled date must be in the future');
+                return;
+            }
+
+            const button = document.getElementById(`reschedule-btn-${postId}`);
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Rescheduling...';
+            }
+
+            try {
+                // Update the post's scheduled_at time
+                const response = await fetch(`/api/posts/${postId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        accessToken: token,
+                        scheduledAt: newDate.toISOString()
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to reschedule');
+                }
+
+                // Reload posts
+                loadPosts(token);
+                alert('Post rescheduled successfully!');
+            } catch (error) {
+                console.error('Error rescheduling:', error);
+                alert(`Failed to reschedule: ${error.message}`);
+                
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = 'Reschedule';
                 }
             }
         }
@@ -1024,6 +1272,33 @@
                 const mode = postModeSelect.value;
                 const isScheduled = scheduleCheckbox && scheduleCheckbox.checked;
                 const scheduledAt = isScheduled && scheduledAtInput ? scheduledAtInput.value : null;
+                
+                // Get repeat settings
+                const repeatEnabled = enableRepeatCheckbox && enableRepeatCheckbox.checked;
+                let repeatSettings = null;
+                if (repeatEnabled && isScheduled) {
+                    const frequency = document.getElementById('repeatFrequency')?.value || 'daily';
+                    const repeatEnd = document.querySelector('input[name="repeatEnd"]:checked')?.value || 'never';
+                    
+                    repeatSettings = {
+                        frequency: frequency,
+                        until: null,
+                        count: null
+                    };
+                    
+                    if (repeatEnd === 'date') {
+                        const untilInput = document.getElementById('repeatUntil');
+                        if (untilInput && untilInput.value) {
+                            repeatSettings.until = new Date(untilInput.value).toISOString();
+                        }
+                    } else if (repeatEnd === 'count') {
+                        const countInput = document.getElementById('repeatCount');
+                        if (countInput && countInput.value) {
+                            repeatSettings.count = parseInt(countInput.value);
+                        }
+                    }
+                    // else 'never' - no end date or count
+                }
 
                 // Collect data based on mode
                 let postData = {
@@ -1077,6 +1352,10 @@
                 if (scheduledAt) {
                     postData.scheduledAt = new Date(scheduledAt).toISOString();
                 }
+                
+                if (repeatSettings) {
+                    postData.repeat = repeatSettings;
+                }
 
                 // Disable button and show status
                 if (createPostBtn) {
@@ -1093,6 +1372,12 @@
                     // Success - clear form and reload posts
                     createPostForm.reset();
                     scheduleInput.classList.remove('active');
+                    if (enableRepeatCheckbox) {
+                        enableRepeatCheckbox.checked = false;
+                    }
+                    if (repeatOptions) {
+                        repeatOptions.style.display = 'none';
+                    }
                     updateModeFields(); // Reset to default mode
                     document.getElementById('charCount').textContent = '0 / 280';
                     
