@@ -6,12 +6,23 @@ const { Pool } = require('pg');
 const getPoolConfig = () => {
   // If DATABASE_URL is provided (common on Render, Heroku, etc.)
   if (process.env.DATABASE_URL) {
+    // Check if DATABASE_URL is for a cloud provider (requires SSL)
+    const isCloudProvider = 
+      process.env.DATABASE_URL.includes('render.com') ||
+      process.env.DATABASE_URL.includes('heroku.com') ||
+      process.env.DATABASE_URL.includes('amazonaws.com') ||
+      process.env.DATABASE_URL.includes('azure.com') ||
+      process.env.DATABASE_URL.includes('sslmode=require');
+    
+    // Check if SSL is explicitly disabled via environment variable
+    const sslEnabled = process.env.DB_SSL !== 'false' && isCloudProvider;
+    
     return {
       connectionString: process.env.DATABASE_URL,
-      // Always enable SSL when using DATABASE_URL (cloud providers require it)
-      ssl: {
+      // Enable SSL only for cloud providers or if explicitly required
+      ssl: sslEnabled ? {
         rejectUnauthorized: false // Allow self-signed certificates
-      },
+      } : false,
       // Connection pool settings
       max: 20,
       idleTimeoutMillis: 30000,
@@ -26,7 +37,7 @@ const getPoolConfig = () => {
     database: process.env.DB_NAME || 'social_media_manager',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || '',
-    ssl: false, // Usually not needed for local
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,

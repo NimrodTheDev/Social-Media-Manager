@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
+const { postToPlatform } = require('../services/postService');
 
 // OAuth 2.0 Configuration
 const X_CLIENT_ID = process.env.X_CLIENT_ID;
@@ -361,6 +362,12 @@ router.get('/api/posts', async (req, res) => {
         p.platform_post_id,
         p.platform_thread_ids,
         p.error_message,
+        p.repeat_enabled,
+        p.repeat_frequency,
+        p.repeat_until,
+        p.repeat_count,
+        p.repeat_parent_id,
+        p.repeat_occurrence,
         p.created_at,
         p.updated_at,
         sa.platform
@@ -412,7 +419,8 @@ router.post('/api/posts', async (req, res) => {
     quoteTweetId, 
     media, 
     accessToken, 
-    scheduledAt 
+    scheduledAt,
+    repeat 
   } = req.body;
 
   if (!accessToken) {
@@ -505,12 +513,21 @@ router.post('/api/posts', async (req, res) => {
     const content = mode === 'thread' ? thread[0] : (text || '');
     const threadData = mode === 'thread' ? JSON.stringify(thread) : null;
 
+    // Handle repeat settings
+    const repeatEnabled = repeat && repeat.frequency ? true : false;
+    const repeatFrequency = repeat && repeat.frequency ? repeat.frequency : null;
+    const repeatUntil = repeat && repeat.until ? new Date(repeat.until) : null;
+    const repeatCount = repeat && repeat.count ? repeat.count : null;
+
     // Create post in database (platform determined from account when posting)
     const result = await pool.query(
       `INSERT INTO posts 
-       (account_id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at, created_at, updated_at`,
+       (account_id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at, 
+        repeat_enabled, repeat_frequency, repeat_until, repeat_count, repeat_occurrence)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, content, mode, thread, reply_to_id, quote_tweet_id, media, status, scheduled_at, 
+                 repeat_enabled, repeat_frequency, repeat_until, repeat_count, repeat_parent_id, repeat_occurrence,
+                 created_at, updated_at`,
       [
         user.account_id,
         content.trim(), 
@@ -520,7 +537,12 @@ router.post('/api/posts', async (req, res) => {
         quoteTweetId || null,
         media ? JSON.stringify(media) : null,
         status, 
-        scheduled_at
+        scheduled_at,
+        repeatEnabled,
+        repeatFrequency,
+        repeatUntil,
+        repeatCount,
+        1 // First occurrence
       ]
     );
 
@@ -551,11 +573,15 @@ router.post('/api/posts', async (req, res) => {
         media: safeParseJSON(post.media),
         status: post.status,
         scheduled_at: post.scheduled_at,
+        repeat_enabled: post.repeat_enabled,
+        repeat_frequency: post.repeat_frequency,
+        repeat_until: post.repeat_until,
+        repeat_count: post.repeat_count,
         created_at: post.created_at,
         updated_at: post.updated_at
       },
       message: status === 'scheduled' 
-        ? 'Post scheduled successfully' 
+        ? (repeatEnabled ? 'Recurring post scheduled successfully' : 'Post scheduled successfully')
         : 'Post created as draft'
     });
   } catch (error) {
@@ -599,127 +625,32 @@ router.post('/api/posts/:id/post', async (req, res) => {
     const post = postResult.rows[0];
 
     if (post.status === 'posted') {
-      return res.status(400).json({ error: 'Post already published' });
+      return res.status(400).json({ error: 'Post already published. Use Repost to create a new post with the same content.' });
     }
 
-    // Post to X API based on mode
-    let tweetId;
-    let threadIds = null;
+    // Post to X API using the service
     const postedAt = new Date();
+    const result = await postToPlatform(post, accessToken);
 
-    // Helper function to safely parse JSON (handles already-parsed JSONB)
-    const safeParseJSON = (value) => {
-      if (!value) return null;
-      if (typeof value === 'string') {
-        try {
-          return JSON.parse(value);
-        } catch (e) {
-          return value; // Return as-is if parsing fails
-        }
-      }
-      return value; // Already parsed (JSONB from PostgreSQL)
-    };
+    if (!result.success) {
+      // Update post status to failed
+      await pool.query(
+        `UPDATE posts 
+         SET status = 'failed',
+             error_message = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [result.error, id]
+      );
 
-    if (post.mode === 'single') {
-      // Single tweet
-      const mediaData = safeParseJSON(post.media);
-      const tweetResponse = await axios.post(
-        `${X_API_BASE}/tweets`,
-        {
-          text: post.content,
-          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      tweetId = tweetResponse.data.data.id;
-    } else if (post.mode === 'thread') {
-      // Thread - post first tweet, then reply to it for subsequent tweets
-      const thread = safeParseJSON(post.thread);
-      const mediaData = safeParseJSON(post.media);
-      const tweetIds = [];
-      
-      // Post first tweet
-      const firstTweetResponse = await axios.post(
-        `${X_API_BASE}/tweets`,
-        {
-          text: thread[0],
-          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      tweetIds.push(firstTweetResponse.data.data.id);
-      
-      // Post subsequent tweets as replies
-      let inReplyToId = firstTweetResponse.data.data.id;
-      for (let i = 1; i < thread.length; i++) {
-        const replyResponse = await axios.post(
-          `${X_API_BASE}/tweets`,
-          {
-            text: thread[i],
-            reply: { in_reply_to_tweet_id: inReplyToId }
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-        tweetIds.push(replyResponse.data.data.id);
-        inReplyToId = replyResponse.data.data.id;
-      }
-      
-      tweetId = tweetIds[0]; // First tweet ID
-      threadIds = JSON.stringify(tweetIds);
-    } else if (post.mode === 'reply') {
-      // Reply tweet
-      const mediaData = safeParseJSON(post.media);
-      const replyResponse = await axios.post(
-        `${X_API_BASE}/tweets`,
-        {
-          text: post.content,
-          reply: { in_reply_to_tweet_id: post.reply_to_id },
-          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      tweetId = replyResponse.data.data.id;
-    } else if (post.mode === 'quote') {
-      // Quote tweet
-      const mediaData = safeParseJSON(post.media);
-      const quoteResponse = await axios.post(
-        `${X_API_BASE}/tweets`,
-        {
-          text: post.content,
-          quote_tweet_id: post.quote_tweet_id,
-          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      tweetId = quoteResponse.data.data.id;
+      return res.status(500).json({ 
+        error: 'Failed to post tweet',
+        message: result.error 
+      });
     }
 
-    // Update post in database
+    // Success - update post in database
+    const threadIds = result.threadIds ? JSON.stringify(result.threadIds) : null;
     await pool.query(
       `UPDATE posts 
        SET status = 'posted',
@@ -729,13 +660,13 @@ router.post('/api/posts/:id/post', async (req, res) => {
            error_message = NULL,
            updated_at = NOW()
        WHERE id = $4`,
-      [postedAt, tweetId, threadIds, id]
+      [postedAt, result.tweetId, threadIds, id]
     );
 
     res.json({ 
       success: true, 
-      tweetId: tweetId,
-      threadIds: threadIds ? safeParseJSON(threadIds) : null,
+      tweetId: result.tweetId,
+      threadIds: result.threadIds,
       message: 'Post published successfully' 
     });
   } catch (error) {
@@ -759,6 +690,140 @@ router.post('/api/posts/:id/post', async (req, res) => {
       error: 'Failed to post tweet',
       message: error.response?.data?.detail || error.message 
     });
+  }
+});
+
+// PATCH /api/posts/:id → update a post (e.g., reschedule, update repeat settings)
+router.patch('/api/posts/:id', async (req, res) => {
+  const { id } = req.params;
+  const { accessToken, scheduledAt, repeat } = req.body;
+
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const pool = require('../db/config');
+  const { getUserFromToken } = require('../utils/userHelpers');
+
+  try {
+    const user = await getUserFromToken(accessToken);
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // Get the post
+    const postResult = await pool.query(
+      `SELECT * FROM posts 
+       WHERE id = $1 AND account_id = $2`,
+      [id, user.account_id]
+    );
+
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    const post = postResult.rows[0];
+
+    // Build update query dynamically
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    // Handle scheduledAt update (reschedule)
+    if (scheduledAt !== undefined) {
+      const scheduledDate = new Date(scheduledAt);
+      if (isNaN(scheduledDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid scheduled_at date format' });
+      }
+      if (scheduledDate <= new Date()) {
+        return res.status(400).json({ error: 'Scheduled date must be in the future' });
+      }
+      
+      updates.push(`scheduled_at = $${paramIndex}`);
+      values.push(scheduledDate);
+      paramIndex++;
+
+      // If setting scheduled_at, ensure status is 'scheduled'
+      if (post.status !== 'posted') {
+        updates.push(`status = $${paramIndex}`);
+        values.push('scheduled');
+        paramIndex++;
+      }
+    }
+
+    // Handle repeat settings update
+    if (repeat !== undefined) {
+      if (repeat === null || repeat === false) {
+        // Disable repeat
+        updates.push(`repeat_enabled = $${paramIndex}`);
+        values.push(false);
+        paramIndex++;
+        updates.push(`repeat_frequency = $${paramIndex}`);
+        values.push(null);
+        paramIndex++;
+        updates.push(`repeat_until = $${paramIndex}`);
+        values.push(null);
+        paramIndex++;
+        updates.push(`repeat_count = $${paramIndex}`);
+        values.push(null);
+        paramIndex++;
+      } else if (typeof repeat === 'object') {
+        // Update repeat settings
+        updates.push(`repeat_enabled = $${paramIndex}`);
+        values.push(true);
+        paramIndex++;
+
+        if (repeat.frequency) {
+          if (!['daily', 'weekly', 'monthly'].includes(repeat.frequency)) {
+            return res.status(400).json({ error: 'Invalid repeat frequency. Must be: daily, weekly, or monthly' });
+          }
+          updates.push(`repeat_frequency = $${paramIndex}`);
+          values.push(repeat.frequency);
+          paramIndex++;
+        }
+
+        if (repeat.until !== undefined) {
+          updates.push(`repeat_until = $${paramIndex}`);
+          values.push(repeat.until ? new Date(repeat.until) : null);
+          paramIndex++;
+        }
+
+        if (repeat.count !== undefined) {
+          updates.push(`repeat_count = $${paramIndex}`);
+          values.push(repeat.count ? parseInt(repeat.count) : null);
+          paramIndex++;
+        }
+      }
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    // Add updated_at
+    updates.push(`updated_at = NOW()`);
+    
+    // Add WHERE clause params
+    values.push(id);
+
+    const updateQuery = `
+      UPDATE posts 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING *
+    `;
+
+    const result = await pool.query(updateQuery, values);
+
+    res.json({
+      success: true,
+      post: result.rows[0],
+      message: 'Post updated successfully'
+    });
+  } catch (error) {
+    console.error('Error updating post:', error);
+    res.status(500).json({ error: 'Failed to update post' });
   }
 });
 
