@@ -371,15 +371,28 @@ router.get('/api/posts', async (req, res) => {
       [user.account_id]
     );
 
-    // Parse JSON fields
+    // Helper function to safely parse JSON (handles already-parsed JSONB)
+    const safeParseJSON = (value) => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value);
+        } catch (e) {
+          return value; // Return as-is if parsing fails
+        }
+      }
+      return value; // Already parsed (JSONB from PostgreSQL)
+    };
+
+    // Parse JSON fields (JSONB columns are already parsed by pg library)
     const posts = result.rows.map(post => ({
       ...post,
-      thread: post.thread ? JSON.parse(post.thread) : null,
-      media: post.media ? JSON.parse(post.media) : null,
-      platform_thread_ids: post.platform_thread_ids ? JSON.parse(post.platform_thread_ids) : null,
+      thread: safeParseJSON(post.thread),
+      media: safeParseJSON(post.media),
+      platform_thread_ids: safeParseJSON(post.platform_thread_ids),
       // Backward compatibility
       x_tweet_id: post.platform_post_id,
-      x_thread_ids: post.platform_thread_ids ? JSON.parse(post.platform_thread_ids) : null
+      x_thread_ids: safeParseJSON(post.platform_thread_ids)
     }));
 
     res.json({ posts: posts });
@@ -513,16 +526,29 @@ router.post('/api/posts', async (req, res) => {
 
     const post = result.rows[0];
 
+    // Helper function to safely parse JSON (handles already-parsed JSONB)
+    const safeParseJSON = (value) => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value);
+        } catch (e) {
+          return value; // Return as-is if parsing fails
+        }
+      }
+      return value; // Already parsed (JSONB from PostgreSQL)
+    };
+
     res.status(201).json({
       success: true,
       post: {
         id: post.id,
         text: post.content,
         mode: post.mode,
-        thread: post.thread ? JSON.parse(post.thread) : null,
+        thread: safeParseJSON(post.thread),
         reply_to_id: post.reply_to_id,
         quote_tweet_id: post.quote_tweet_id,
-        media: post.media ? JSON.parse(post.media) : null,
+        media: safeParseJSON(post.media),
         status: post.status,
         scheduled_at: post.scheduled_at,
         created_at: post.created_at,
@@ -581,13 +607,27 @@ router.post('/api/posts/:id/post', async (req, res) => {
     let threadIds = null;
     const postedAt = new Date();
 
+    // Helper function to safely parse JSON (handles already-parsed JSONB)
+    const safeParseJSON = (value) => {
+      if (!value) return null;
+      if (typeof value === 'string') {
+        try {
+          return JSON.parse(value);
+        } catch (e) {
+          return value; // Return as-is if parsing fails
+        }
+      }
+      return value; // Already parsed (JSONB from PostgreSQL)
+    };
+
     if (post.mode === 'single') {
       // Single tweet
+      const mediaData = safeParseJSON(post.media);
       const tweetResponse = await axios.post(
         `${X_API_BASE}/tweets`,
         {
           text: post.content,
-          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
         },
         {
           headers: {
@@ -599,7 +639,8 @@ router.post('/api/posts/:id/post', async (req, res) => {
       tweetId = tweetResponse.data.data.id;
     } else if (post.mode === 'thread') {
       // Thread - post first tweet, then reply to it for subsequent tweets
-      const thread = JSON.parse(post.thread);
+      const thread = safeParseJSON(post.thread);
+      const mediaData = safeParseJSON(post.media);
       const tweetIds = [];
       
       // Post first tweet
@@ -607,7 +648,7 @@ router.post('/api/posts/:id/post', async (req, res) => {
         `${X_API_BASE}/tweets`,
         {
           text: thread[0],
-          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
         },
         {
           headers: {
@@ -642,12 +683,13 @@ router.post('/api/posts/:id/post', async (req, res) => {
       threadIds = JSON.stringify(tweetIds);
     } else if (post.mode === 'reply') {
       // Reply tweet
+      const mediaData = safeParseJSON(post.media);
       const replyResponse = await axios.post(
         `${X_API_BASE}/tweets`,
         {
           text: post.content,
           reply: { in_reply_to_tweet_id: post.reply_to_id },
-          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
         },
         {
           headers: {
@@ -659,12 +701,13 @@ router.post('/api/posts/:id/post', async (req, res) => {
       tweetId = replyResponse.data.data.id;
     } else if (post.mode === 'quote') {
       // Quote tweet
+      const mediaData = safeParseJSON(post.media);
       const quoteResponse = await axios.post(
         `${X_API_BASE}/tweets`,
         {
           text: post.content,
           quote_tweet_id: post.quote_tweet_id,
-          ...(post.media && { media: { media_ids: JSON.parse(post.media).map(m => m.media_id) } })
+          ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
         },
         {
           headers: {
@@ -692,7 +735,7 @@ router.post('/api/posts/:id/post', async (req, res) => {
     res.json({ 
       success: true, 
       tweetId: tweetId,
-      threadIds: threadIds ? JSON.parse(threadIds) : null,
+      threadIds: threadIds ? safeParseJSON(threadIds) : null,
       message: 'Post published successfully' 
     });
   } catch (error) {
