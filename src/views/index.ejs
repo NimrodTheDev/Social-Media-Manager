@@ -1303,31 +1303,67 @@
         window.removeThreadItem = removeThreadItem;
         window.addThreadItem = addThreadItem;
 
-        // Handle create post form submission
-        const createPostForm = document.getElementById('createPostForm');
-        const scheduleCheckbox = document.getElementById('schedulePost');
-        const scheduleInput = document.getElementById('scheduleInput');
-        const scheduledAtInput = document.getElementById('scheduledAt');
-        const createPostBtn = document.getElementById('createPostBtn');
-        const createPostStatus = document.getElementById('createPostStatus');
+        // Initialize form handlers (runs after DOM is ready)
+        function initializeFormHandlers() {
+            const createPostForm = document.getElementById('createPostForm');
+            const scheduleCheckbox = document.getElementById('schedulePost');
+            const scheduleInput = document.getElementById('scheduleInput');
+            const scheduledAtInput = document.getElementById('scheduledAt');
+            const enableRepeatCheckbox = document.getElementById('enableRepeat');
+            const repeatOptions = document.getElementById('repeatOptions');
+            const createPostBtn = document.getElementById('createPostBtn');
+            const createPostStatus = document.getElementById('createPostStatus');
 
-        // Toggle schedule input visibility
-        if (scheduleCheckbox && scheduleInput) {
-            scheduleCheckbox.addEventListener('change', function() {
-                if (this.checked) {
-                    scheduleInput.classList.add('active');
-                    // Set minimum date to now
-                    const now = new Date();
-                    now.setMinutes(now.getMinutes() + 1); // At least 1 minute in future
-                    scheduledAtInput.min = now.toISOString().slice(0, 16);
-                } else {
-                    scheduleInput.classList.remove('active');
-                }
-            });
-        }
+            if (!createPostForm) return;
 
-        // Handle form submission
-        if (createPostForm) {
+            // Toggle schedule input visibility
+            if (scheduleCheckbox && scheduleInput) {
+                scheduleCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        scheduleInput.classList.add('active');
+                        // Set minimum date to now
+                        const now = new Date();
+                        now.setMinutes(now.getMinutes() + 1); // At least 1 minute in future
+                        if (scheduledAtInput) {
+                            scheduledAtInput.min = now.toISOString().slice(0, 16);
+                        }
+                    } else {
+                        scheduleInput.classList.remove('active');
+                        // Hide repeat options if schedule is unchecked
+                        if (enableRepeatCheckbox) {
+                            enableRepeatCheckbox.checked = false;
+                        }
+                        if (repeatOptions) {
+                            repeatOptions.style.display = 'none';
+                        }
+                    }
+                });
+            }
+
+            // Toggle repeat options visibility
+            if (enableRepeatCheckbox && repeatOptions) {
+                enableRepeatCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        repeatOptions.style.display = 'block';
+                        // Ensure schedule is also checked
+                        if (scheduleCheckbox && !scheduleCheckbox.checked) {
+                            scheduleCheckbox.checked = true;
+                            if (scheduleInput) {
+                                scheduleInput.classList.add('active');
+                            }
+                            const now = new Date();
+                            now.setMinutes(now.getMinutes() + 1);
+                            if (scheduledAtInput) {
+                                scheduledAtInput.min = now.toISOString().slice(0, 16);
+                            }
+                        }
+                    } else {
+                        repeatOptions.style.display = 'none';
+                    }
+                });
+            }
+
+            // Handle form submission
             createPostForm.addEventListener('submit', async function(e) {
                 e.preventDefault();
                 
@@ -1338,11 +1374,14 @@
                 }
 
                 const mode = postModeSelect.value;
-                const isScheduled = scheduleCheckbox && scheduleCheckbox.checked;
-                const scheduledAt = isScheduled && scheduledAtInput ? scheduledAtInput.value : null;
+                const scheduleCheckboxEl = document.getElementById('schedulePost');
+                const scheduledAtInputEl = document.getElementById('scheduledAt');
+                const enableRepeatCheckboxEl = document.getElementById('enableRepeat');
+                const isScheduled = scheduleCheckboxEl && scheduleCheckboxEl.checked;
+                const scheduledAt = isScheduled && scheduledAtInputEl ? scheduledAtInputEl.value : null;
                 
                 // Get repeat settings
-                const repeatEnabled = enableRepeatCheckbox && enableRepeatCheckbox.checked;
+                const repeatEnabled = enableRepeatCheckboxEl && enableRepeatCheckboxEl.checked;
                 let repeatSettings = null;
                 if (repeatEnabled && isScheduled) {
                     const frequency = document.getElementById('repeatFrequency')?.value || 'daily';
@@ -1427,12 +1466,17 @@
                     
                     // Success - clear form and reload posts
                     createPostForm.reset();
-                    scheduleInput.classList.remove('active');
-                    if (enableRepeatCheckbox) {
-                        enableRepeatCheckbox.checked = false;
+                    const scheduleInputEl = document.getElementById('scheduleInput');
+                    const enableRepeatCheckboxEl = document.getElementById('enableRepeat');
+                    const repeatOptionsEl = document.getElementById('repeatOptions');
+                    if (scheduleInputEl) {
+                        scheduleInputEl.classList.remove('active');
                     }
-                    if (repeatOptions) {
-                        repeatOptions.style.display = 'none';
+                    if (enableRepeatCheckboxEl) {
+                        enableRepeatCheckboxEl.checked = false;
+                    }
+                    if (repeatOptionsEl) {
+                        repeatOptionsEl.style.display = 'none';
                     }
                     updateModeFields(); // Reset to default mode
                     document.getElementById('charCount').textContent = '0 / 280';
@@ -1486,6 +1530,13 @@
                     }
                 }
             });
+        }
+
+        // Initialize form handlers when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeFormHandlers);
+        } else {
+            initializeFormHandlers();
         }
 
         // Initialize auth check on page load
