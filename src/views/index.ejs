@@ -722,14 +722,13 @@
 
             try {
                 const response = await fetch(`/api/user?accessToken=${encodeURIComponent(accessToken)}`);
-                const data = await response.json();
-
-                // Check for authentication errors
-                if (response.status === 401) {
-                    console.warn('Token invalid or expired');
-                    handleTokenFailure();
+                
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(response)) {
                     return;
                 }
+                
+                const data = await response.json();
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to load user data');
@@ -798,12 +797,13 @@
 
             try {
                 const response = await fetch(`/api/posts?accessToken=${encodeURIComponent(accessToken)}`);
-                const data = await response.json();
-
-                if (response.status === 401) {
-                    handleTokenFailure();
+                
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(response)) {
                     return;
                 }
+                
+                const data = await response.json();
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to load posts');
@@ -908,12 +908,16 @@
                     body: JSON.stringify({ accessToken: token })
                 });
 
-                const data = await response.json();
-
-                if (response.status === 401) {
-                    handleTokenFailure();
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(response)) {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = originalText;
+                    }
                     return;
                 }
+
+                const data = await response.json();
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to post');
@@ -949,6 +953,16 @@
             try {
                 // Get the post details first
                 const getResponse = await fetch(`/api/posts?accessToken=${encodeURIComponent(token)}`);
+                
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(getResponse)) {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = 'Repost';
+                    }
+                    return;
+                }
+                
                 const getData = await getResponse.json();
                 
                 if (!getResponse.ok) {
@@ -991,6 +1005,15 @@
                     body: JSON.stringify(postData)
                 });
 
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(createResponse)) {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = 'Repost';
+                    }
+                    return;
+                }
+
                 const createData = await createResponse.json();
 
                 if (!createResponse.ok) {
@@ -1021,6 +1044,12 @@
 
             // Get current scheduled time
             const getResponse = await fetch(`/api/posts?accessToken=${encodeURIComponent(token)}`);
+            
+            // Check for unauthorized errors (including 500 with unauthorized message)
+            if (await checkForUnauthorizedError(getResponse)) {
+                return;
+            }
+            
             const getData = await getResponse.json();
             
             if (!getResponse.ok) {
@@ -1128,6 +1157,15 @@
                     })
                 });
 
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(response)) {
+                    if (button) {
+                        button.disabled = false;
+                        button.textContent = 'Reschedule';
+                    }
+                    return;
+                }
+
                 const data = await response.json();
 
                 if (!response.ok) {
@@ -1171,12 +1209,12 @@
                     body: JSON.stringify(postData)
                 });
 
-                const data = await response.json();
-
-                if (response.status === 401) {
-                    handleTokenFailure();
+                // Check for unauthorized errors (including 500 with unauthorized message)
+                if (await checkForUnauthorizedError(response)) {
                     return false;
                 }
+
+                const data = await response.json();
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to create post');
@@ -1214,6 +1252,54 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Helper function to check for unauthorized errors (500 or other status codes)
+        async function checkForUnauthorizedError(response) {
+            // Check for 500 status code
+            if (response.status === 500) {
+                try {
+                    const data = await response.clone().json();
+                    const errorMessage = (data.error || data.message || JSON.stringify(data)).toLowerCase();
+                    
+                    if (errorMessage.includes('unauthorized') || 
+                        errorMessage.includes('invalid token') || 
+                        errorMessage.includes('expired token') ||
+                        errorMessage.includes('token expired') ||
+                        errorMessage.includes('authentication failed')) {
+                        console.warn('Unauthorized error detected in 500 response:', errorMessage);
+                        handleTokenFailure();
+                        return true;
+                    }
+                } catch (e) {
+                    // If we can't parse JSON, try to get text
+                    try {
+                        const text = await response.clone().text();
+                        const errorMessage = text.toLowerCase();
+                        
+                        if (errorMessage.includes('unauthorized') || 
+                            errorMessage.includes('invalid token') || 
+                            errorMessage.includes('expired token') ||
+                            errorMessage.includes('token expired') ||
+                            errorMessage.includes('authentication failed')) {
+                            console.warn('Unauthorized error detected in 500 response text:', errorMessage);
+                            handleTokenFailure();
+                            return true;
+                        }
+                    } catch (e2) {
+                        // If we can't read the response, just log it
+                        console.error('Error reading 500 response:', e2);
+                    }
+                }
+            }
+            
+            // Also check for 401 (already handled, but be consistent)
+            if (response.status === 401) {
+                handleTokenFailure();
+                return true;
+            }
+            
+            return false;
         }
 
         // Handle mode switching
