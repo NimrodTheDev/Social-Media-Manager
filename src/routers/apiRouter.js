@@ -2,182 +2,76 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 const { postToPlatform } = require('../services/postService');
+const Auth = require('../apiHandlers/Auth');
+const authMiddleware = require('../middleware/auth');
+const Social = require('../apiHandlers/Social');
+const { makeResponse } = require('../utils/responder');
+
 
 // OAuth 2.0 Configuration
-const X_CLIENT_ID = process.env.X_CLIENT_ID;
-const X_CLIENT_SECRET = process.env.X_CLIENT_SECRET;
-const X_REDIRECT_URI = process.env.X_REDIRECT_URI || 'http://localhost:3100/auth/callback';
-const X_AUTH_URL = 'https://twitter.com/i/oauth2/authorize';
-const X_TOKEN_URL = 'https://api.twitter.com/2/oauth2/token';
+
 const X_API_BASE = 'https://api.twitter.com/2';
 
+
+// Auth routes (email/password)
+router.post('/auth/login', Auth.login);
+router.post('/auth/signup', Auth.signUp);
+router.post('/auth/request-reset', Auth.requestResetPassword);
+router.post('/auth/reset-password', Auth.resetPassword);
+router.get('/auth/me', authMiddleware, Auth.me);
+router.post('/auth/refresh', Auth.refresh);
+router.post('/auth/logout', Auth.logout);
+
+
+
+
+// Transactional email (Resend) – test endpoint
+router.post('/api/email/test', async (req, res) => {
+  const to = req.body?.to || req.query?.to;
+  if (!to) {
+    return res.status(400).json({ success: false, message: 'Missing "to" email' });
+  }
+  if (!isConfigured) {
+    return res.status(503).json({ success: false, message: 'Email service not configured (set RESEND_API_KEY)' });
+  }
+  const result = await sendHtml(
+    to,
+    'Test from SocialMediaManager',
+    '<p>If you see this, Resend is working.</p>'
+  );
+  if (!result.success) {
+    return res.status(500).json({ success: false, message: result.error });
+  }
+  res.json({ success: true, message: 'Email sent', id: result.id });
+});
+
+
+//Social connenctions
 // GET /auth/x → redirect user to X OAuth authorization page
-router.get('/auth/x', (req, res) => {
-  if (!X_CLIENT_ID || !X_REDIRECT_URI) {
-    return res.render('error', { 
-      message: 'X API credentials not configured. Please set X_CLIENT_ID and X_REDIRECT_URI environment variables.' 
-    });
-  }
-
-  // Generate a random state parameter for CSRF protection (simplified for MVP)
-  const state = Math.random().toString(36).substring(7);
-  
-  // Build OAuth 2.0 authorization URL
-  const authParams = new URLSearchParams({
-    response_type: 'code',
-    client_id: X_CLIENT_ID,
-    redirect_uri: X_REDIRECT_URI,
-    scope: 'tweet.read tweet.write users.read offline.access',
-    state: state,
-    code_challenge: 'challenge', // Simplified for MVP - should use PKCE in production
-    code_challenge_method: 'plain'
-  });
-
-  const authUrl = `${X_AUTH_URL}?${authParams.toString()}`;
-  
-  // Redirect user to X authorization page
-  res.redirect(authUrl);
-});
-
+router.get('/connect/x', Social.connectX);
 // GET /auth/callback → exchange authorization code for access token
-// GET /auth/callback → exchange authorization code for access token
-router.get('/auth/callback', async (req, res) => {
-  const { code, error } = req.query;
+router.get('/connect/x/callback', Social.callbackX);
+// GET /api/connected-accounts → get connected accounts for authenticated user
+router.get('/connected-accounts', authMiddleware, Social.connectedAccounts);
 
-  if (error) {
-    return res.render('error', { 
-      message: `OAuth error: ${error}` 
-    });
-  }
 
-  if (!code) {
-    return res.render('error', { 
-      message: 'No authorization code received' 
-    });
-  }
-
-  if (!X_CLIENT_ID || !X_CLIENT_SECRET || !X_REDIRECT_URI) {
-    return res.render('error', { 
-      message: 'X API credentials not configured. Please set X_CLIENT_ID, X_CLIENT_SECRET, and X_REDIRECT_URI environment variables.' 
-    });
-  }
-
-  const pool = require('../db/config');
-  const { getXUserInfo } = require('../utils/xApi');
-
-  try {
-    // Exchange authorization code for access token
-    const credentials = Buffer.from(`${X_CLIENT_ID}:${X_CLIENT_SECRET}`).toString('base64');
-    
-    const tokenResponse = await axios.post(
-      X_TOKEN_URL,
-      new URLSearchParams({
-        code: code,
-        grant_type: 'authorization_code',
-        redirect_uri: X_REDIRECT_URI,
-        code_verifier: 'challenge'
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Basic ${credentials}`
-        }
-      }
-    );
-
-    // Extract token data
-    const accessToken = tokenResponse.data.access_token;
-    const refreshToken = tokenResponse.data.refresh_token || null;
-    const expiresIn = tokenResponse.data.expires_in;
-    const expiresAt = expiresIn ? new Date(Date.now() + (expiresIn * 1000)) : null;
-
-    // Get X user information
-    const xUser = await getXUserInfo(accessToken);
-
-    // Check if X account already exists
-    const existingAccount = await pool.query(
-      'SELECT user_id FROM social_accounts WHERE platform = $1 AND platform_user_id = $2',
-      ['x', xUser.id]
-    );
-
-    let userId;
-
-    if (existingAccount.rows.length > 0) {
-      // Account exists - update tokens
-      userId = existingAccount.rows[0].user_id;
-      
-      await pool.query(
-        `UPDATE social_accounts 
-         SET access_token = $1, 
-             refresh_token = $2,
-             token_expires_at = $3,
-             platform_username = $4,
-             is_active = true,
-             updated_at = NOW()
-         WHERE platform = $5 AND platform_user_id = $6`,
-        [accessToken, refreshToken, expiresAt, xUser.username, 'x', xUser.id]
-      );
-    } else {
-      // New account - create user and X account
-      const userResult = await pool.query(
-        'INSERT INTO users (name) VALUES ($1) RETURNING id',
-        [xUser.name || xUser.username]
-      );
-      userId = userResult.rows[0].id;
-      
-      await pool.query(
-        `INSERT INTO social_accounts 
-         (user_id, platform, access_token, refresh_token, token_expires_at, platform_user_id, platform_username)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [userId, 'x', accessToken, refreshToken, expiresAt, xUser.id, xUser.username]
-      );
-    }
-
-    // Redirect to homepage with token
-    res.redirect(`/?token=${encodeURIComponent(accessToken)}&message=Account connected successfully!`);
-  } catch (error) {
-    console.error('Token exchange error:', {
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data,
-      message: error.message
-    });
-    
-    const errorMessage = error.response?.data?.error_description 
-      || error.response?.data?.error 
-      || error.message 
-      || 'Unknown error occurred';
-    
-    res.render('error', { 
-      message: `Failed to exchange authorization code: ${errorMessage}` 
-    });
-  }
-});
 
 // POST /post → submit tweet text from form and post it to X
 router.post('/post', async (req, res) => {
   const { tweetText, accessToken } = req.body;
 
   if (!tweetText || tweetText.trim().length === 0) {
-    return res.render('error', { 
-      message: 'Tweet text cannot be empty' 
-    });
+    return res.redirect(`/?error=${encodeURIComponent('Tweet text cannot be empty')}`);
   }
 
-  // Get access token from request body (sent from client localStorage)
   const token = accessToken;
 
   if (!token) {
-    return res.render('error', { 
-      message: 'Not authenticated. Please connect your X account first.' 
-    });
+    return res.redirect(`/?error=${encodeURIComponent('Not authenticated. Connect your X account first.')}`);
   }
 
-  // X API v2 tweet character limit is 280
   if (tweetText.length > 280) {
-    return res.render('error', { 
-      message: 'Tweet text exceeds 280 characters' 
-    });
+    return res.redirect(`/?error=${encodeURIComponent('Tweet text exceeds 280 characters')}`);
   }
 
   const pool = require('../db/config');
@@ -187,9 +81,7 @@ router.post('/post', async (req, res) => {
     // Verify token is valid before attempting to post
     const user = await getUserFromToken(token);
     if (!user) {
-      return res.render('error', { 
-        message: 'Invalid or expired token. Please reconnect your X account.' 
-      });
+      return res.redirect(`/?error=${encodeURIComponent('Invalid or expired token. Reconnect your X account.')}`);
     }
 
     // Post tweet to X API v2
@@ -217,25 +109,19 @@ router.post('/post', async (req, res) => {
       [user.account_id, tweetText.trim(), 'posted', postedAt, tweetId]
     );
 
-    // Success - render success page
-    res.render('success', { 
-      tweetId: tweetId,
-      tweetText: tweetText.trim()
-    });
+    res.redirect(`/?message=${encodeURIComponent('Post published successfully!')}`);
   } catch (error) {
     console.error('Tweet posting error:', error.response?.data || error.message);
-    
+
     // Check if it's an authentication error from X API
-    const isAuthError = error.response?.status === 401 || 
-                       error.response?.status === 403 ||
-                       error.response?.data?.title === 'Unauthorized';
-    
+    const isAuthError = error.response?.status === 401 ||
+      error.response?.status === 403 ||
+      error.response?.data?.title === 'Unauthorized';
+
     if (isAuthError) {
-      return res.render('error', { 
-        message: 'Your X account access has expired or been revoked. Please reconnect your account.' 
-      });
+      return res.redirect(`/?error=${encodeURIComponent('X account access expired or revoked. Reconnect your account.')}`);
     }
-    
+
     // Save failed post to database if we have user info
     try {
       const user = await getUserFromToken(token);
@@ -245,9 +131,9 @@ router.post('/post', async (req, res) => {
            (account_id, content, status, error_message)
            VALUES ($1, $2, $3, $4)`,
           [
-            user.account_id, 
-            tweetText.trim(), 
-            'failed', 
+            user.account_id,
+            tweetText.trim(),
+            'failed',
             error.response?.data?.detail || error.message
           ]
         );
@@ -255,10 +141,8 @@ router.post('/post', async (req, res) => {
     } catch (dbError) {
       console.error('Error saving failed post:', dbError);
     }
-    
-    res.render('error', { 
-      message: `Failed to post tweet: ${error.response?.data?.detail || error.message}` 
-    });
+
+    res.redirect(`/?error=${encodeURIComponent('Failed to post: ' + (error.response?.data?.detail || error.message))}`);
   }
 });
 
@@ -411,16 +295,16 @@ router.get('/api/posts', async (req, res) => {
 
 // POST /api/posts → create a new post and store it in database (as draft)
 router.post('/api/posts', async (req, res) => {
-  const { 
-    text, 
-    mode = 'single', 
-    thread, 
-    replyToId, 
-    quoteTweetId, 
-    media, 
-    accessToken, 
+  const {
+    text,
+    mode = 'single',
+    thread,
+    replyToId,
+    quoteTweetId,
+    media,
+    accessToken,
     scheduledAt,
-    repeat 
+    repeat
   } = req.body;
 
   if (!accessToken) {
@@ -530,13 +414,13 @@ router.post('/api/posts', async (req, res) => {
                  created_at, updated_at`,
       [
         user.account_id,
-        content.trim(), 
+        content.trim(),
         mode,
         threadData,
         replyToId || null,
         quoteTweetId || null,
         media ? JSON.stringify(media) : null,
-        status, 
+        status,
         scheduled_at,
         repeatEnabled,
         repeatFrequency,
@@ -580,7 +464,7 @@ router.post('/api/posts', async (req, res) => {
         created_at: post.created_at,
         updated_at: post.updated_at
       },
-      message: status === 'scheduled' 
+      message: status === 'scheduled'
         ? (repeatEnabled ? 'Recurring post scheduled successfully' : 'Post scheduled successfully')
         : 'Post created as draft'
     });
@@ -643,9 +527,9 @@ router.post('/api/posts/:id/post', async (req, res) => {
         [result.error, id]
       );
 
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Failed to post tweet',
-        message: result.error 
+        message: result.error
       });
     }
 
@@ -663,15 +547,15 @@ router.post('/api/posts/:id/post', async (req, res) => {
       [postedAt, result.tweetId, threadIds, id]
     );
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       tweetId: result.tweetId,
       threadIds: result.threadIds,
-      message: 'Post published successfully' 
+      message: 'Post published successfully'
     });
   } catch (error) {
     console.error('Error posting tweet:', error.response?.data || error.message);
-    
+
     // Update post status to failed
     try {
       await pool.query(
@@ -686,9 +570,9 @@ router.post('/api/posts/:id/post', async (req, res) => {
       console.error('Error updating failed post:', dbError);
     }
 
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to post tweet',
-      message: error.response?.data?.detail || error.message 
+      message: error.response?.data?.detail || error.message
     });
   }
 });
@@ -739,7 +623,7 @@ router.patch('/api/posts/:id', async (req, res) => {
       if (scheduledDate <= new Date()) {
         return res.status(400).json({ error: 'Scheduled date must be in the future' });
       }
-      
+
       updates.push(`scheduled_at = $${paramIndex}`);
       values.push(scheduledDate);
       paramIndex++;
@@ -803,7 +687,7 @@ router.patch('/api/posts/:id', async (req, res) => {
 
     // Add updated_at
     updates.push(`updated_at = NOW()`);
-    
+
     // Add WHERE clause params
     values.push(id);
 
@@ -826,5 +710,6 @@ router.patch('/api/posts/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to update post' });
   }
 });
+
 
 module.exports = router;
