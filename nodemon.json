@@ -1,15 +1,8 @@
 {
-  "watch": [
-    "src"
-  ],
-  "ext": "js,json,ejs",
-  "ignore": [
-    "node_modules",
-    "*.log",
-    ".git"
-  ],
-  "env": {
-    "NODE_ENV": "development"
-  },
-  "delay": 1000
+  "watch": ["src", "mediaflow/src"],
+  "ext": "js,json,ejs,html,css",
+  "ignore": ["node_modules", "*.log", ".git"],
+  "env": { "NODE_ENV": "development" },
+  "delay": "500",
+  "verbose": true
 }
