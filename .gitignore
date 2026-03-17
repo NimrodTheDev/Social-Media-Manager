@@ -49,3 +49,6 @@ coverage/
 
 # Optional eslint cache
 .eslintcache
+
+node_modules/
+mediaflow/node_modules/
