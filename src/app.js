@@ -39,7 +39,7 @@ if (isDev) {
   }));
 } else {
   // Production: Serve built files from dist
-  app.use("/assets", express.static(path.join(__dirname, '..', 'mediaflow', 'dist')));
+  app.use(express.static(path.join(__dirname, '..', 'mediaflow', 'dist')));
   // SPA fallback: serve index.html for any other GET
   app.use('/', appRouter);
 }
