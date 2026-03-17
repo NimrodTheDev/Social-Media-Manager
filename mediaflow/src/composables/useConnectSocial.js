@@ -11,9 +11,16 @@ const useConnectSocial = () => {
         console.log(response);
         return response.data;
     }
+    const disconnectSocial = async (id) => {
+        const response = await api(`/disconnect-social/${id}`, {
+            method: 'DELETE'
+        });
+        return response.data;
+    }
     return {
         connectSocial,
-        connectedAccounts
+        connectedAccounts,
+        disconnectSocial
     }
 }
 

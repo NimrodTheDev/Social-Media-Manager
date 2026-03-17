@@ -3,14 +3,19 @@ import { useAuth } from '../composables/useAuth'
 import { useRouter } from 'vue-router'
 import { useNavigation } from '../composables/useNavigation'
 import { useConnectSocial } from '../composables/useConnectSocial'
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 const router = useRouter()
 const { user } = useAuth()
 const { navObject } = useNavigation()
-const { connectSocial, connectedAccounts } = useConnectSocial()
+const { connectSocial, connectedAccounts, disconnectSocial } = useConnectSocial()
 
-onMounted(()=>{
-    connectedAccounts()
+const accounts = ref([])
+const fetchAccounts = async () => {
+    accounts.value = await connectedAccounts()
+}
+
+onMounted(async()=>{
+    await fetchAccounts()
 })
 
 const platforms = [
@@ -21,12 +26,31 @@ const platforms = [
   { id: 'facebook', name: 'Facebook', icon: 'f', connected: false, color: '#fff', bg: '#1877f2' }
 ]
 
+const findConnected = (platformId) => {
+    return accounts.value.find(account => account.platform === platformId)
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'Never'
+  const date = new Date(dateString)
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
+}
+
 const createPost = () => {
   router.push(navObject.createPost.path)
 }
 
 const connectPlatform = (platformId) => {
   connectSocial(platformId)
+}
+const disconnectPlatform = async (id) => {
+  await disconnectSocial(id)
+  await fetchAccounts() // Refresh the list after disconnecting
 }
 </script>
 
@@ -91,12 +115,16 @@ const connectPlatform = (platformId) => {
               </div>
               <div class="platform-details">
                 <h3>{{ platform.name }}</h3>
-                <p class="status disconnected">Not connected</p>
+                <div v-if="findConnected(platform.id)" class="connection-info">
+                  <p class="status connected">Connected as @{{ findConnected(platform.id).platform_username }}</p>
+                  <p class="expiry">Expires: {{ formatDate(findConnected(platform.id).token_expires_at) }}</p>
+                </div>
+                <p v-else class="status disconnected">Not connected</p>
               </div>
             </div>
             
-            <button class="btn connect-btn" v-if="!platform.connected" @click="connectPlatform(platform.id)">
-              Connect
+            <button class="btn connect-btn" @click="findConnected(platform.id) ? disconnectPlatform(findConnected(platform.id).id) : connectPlatform(platform.id)">
+              {{ findConnected(platform.id) ? 'Disconnect' : 'Connect' }}
             </button>
           </div>
         </div>
@@ -301,9 +329,18 @@ const connectPlatform = (platformId) => {
   border-radius: 16px;
   padding: 1.25rem;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column; /* Stack on mobile by default */
+  gap: 1.25rem;
   transition: all 0.2s;
+}
+
+@media (min-width: 480px) {
+  .platform-card {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
 }
 
 .platform-card:hover {
@@ -355,17 +392,37 @@ const connectPlatform = (platformId) => {
   color: #00ba7c;
 }
 
+.connection-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.expiry {
+  font-size: 0.75rem;
+  color: #71767b;
+  font-weight: 400;
+}
+
 .connect-btn {
   background: #eff3f4;
   color: #0f1419;
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0.7rem 1.25rem;
   border-radius: 99px;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
+  width: 100%; /* Full width on mobile */
+}
+
+@media (min-width: 480px) {
+  .connect-btn {
+    width: auto;
+    padding: 0.5rem 1rem;
+  }
 }
 
 .connect-btn:hover {

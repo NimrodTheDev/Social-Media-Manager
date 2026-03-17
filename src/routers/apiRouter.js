@@ -53,6 +53,11 @@ router.get('/connect/x', Social.connectX);
 router.get('/connect/x/callback', Social.callbackX);
 // GET /api/connected-accounts → get connected accounts for authenticated user
 router.get('/connected-accounts', authMiddleware, Social.connectedAccounts);
+// DELETE /api/disconnect-social/:id → disconnect a social account
+
+router.get('/connect/linkedin', Social.connectLinkedIn);
+router.get('/connect/linkedin/callback', Social.callbackLinkedIn);
+router.delete('/disconnect-social/:id', authMiddleware, Social.disconnectSocial);
 
 
 
