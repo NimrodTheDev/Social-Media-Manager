@@ -1,3 +1,4 @@
+import { api } from '../api'
 import { useAuth } from './useAuth'
 const { token } = useAuth()
 const useConnectSocial = () => {
