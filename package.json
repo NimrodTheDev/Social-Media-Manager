@@ -37,6 +37,6 @@
     "dev:all": "concurrently \"npm run dev:server\" \"npm run dev:vite\"",
     "watch": "nodemon src/app.js",
     "migrate": "node src/db/migrate.js",
-    "setup": "npm run migrate && npm start"
+    "setup": "cd mediaflow && bun install && bun run build && cd .. && npm install && npm run migrate && npm start"
   }
 }
