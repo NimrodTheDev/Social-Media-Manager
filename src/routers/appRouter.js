@@ -3,7 +3,7 @@ const path = require('path');
 const router = express.Router();
 
 // GET / → serve Vue app (public/index.html) or redirect OAuth callback
-router.get('*', (req, res) => {
+router.get('*', (req, res, next) => {
   if (req.path.includes('.')) {
     return next();
   }
