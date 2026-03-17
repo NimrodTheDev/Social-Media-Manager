@@ -4,11 +4,11 @@ const router = express.Router();
 
 // GET / → serve Vue app (public/index.html) or redirect OAuth callback
 router.get('*', (req, res) => {
-  if (req.query.code) {
-    const queryString = new URLSearchParams(req.query).toString();
-    return res.redirect(`/auth/callback?${queryString}`);
+  if (req.path.includes('.')) {
+    return next();
   }
-  res.sendFile(path.join(__dirname, "../../mediaflow/index.html"));
+  // MUST point to the built dist/index.html so Vue Router can mount correctly on direct URL visits
+  res.sendFile(path.join(__dirname, "../../mediaflow/dist/index.html"));
 });
 
 module.exports = router;
