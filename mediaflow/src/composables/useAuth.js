@@ -54,10 +54,10 @@ export function useAuth() {
     return res
   }
 
-  async function signup(email, password, name) {
+  async function signup(email, password, name, code) {
     const res = await api('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, code }),
     })
 
     if (res.success && res.data) {
@@ -66,8 +66,8 @@ export function useAuth() {
     return res
   }
 
-  async function requestResetPassword(email) {
-    return await api('/auth/request-reset', {
+  async function requestVerificationCode(email) {
+    return await api('/auth/request-verification', {
       method: 'POST',
       body: JSON.stringify({ email }),
     })
@@ -79,7 +79,12 @@ export function useAuth() {
       body: JSON.stringify({ token, password }),
     })
   }
-
+  async function requestResetPassword(email) {
+    return await api('/auth/request-reset', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    })
+  }
   async function me() {
     const res = await api('/auth/me', {
       method: 'GET',
@@ -117,6 +122,7 @@ export function useAuth() {
     login,
     signup,
     logout,
+    requestVerificationCode,
     requestResetPassword,
     resetPassword,
     me,

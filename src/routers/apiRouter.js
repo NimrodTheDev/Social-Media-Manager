@@ -6,6 +6,7 @@ const Auth = require('../apiHandlers/Auth');
 const authMiddleware = require('../middleware/auth');
 const Social = require('../apiHandlers/Social');
 const { makeResponse } = require('../utils/responder');
+const { Dashboard } = require('../apiHandlers/Dashboard');
 
 
 // OAuth 2.0 Configuration
@@ -15,6 +16,7 @@ const X_API_BASE = 'https://api.twitter.com/2';
 
 // Auth routes (email/password)
 router.post('/auth/login', Auth.login);
+router.post('/auth/request-verification', Auth.requestVerificationCode);
 router.post('/auth/signup', Auth.signUp);
 router.post('/auth/request-reset', Auth.requestResetPassword);
 router.post('/auth/reset-password', Auth.resetPassword);
@@ -58,6 +60,9 @@ router.get('/connected-accounts', authMiddleware, Social.connectedAccounts);
 router.get('/connect/linkedin', Social.connectLinkedIn);
 router.get('/connect/linkedin/callback', Social.callbackLinkedIn);
 router.delete('/disconnect-social/:id', authMiddleware, Social.disconnectSocial);
+
+// GET /api/platforms → get list of all allowed social media platforms
+router.get('/platforms', authMiddleware, Social.getAllSocialAccounts);
 
 
 
@@ -151,71 +156,7 @@ router.post('/post', async (req, res) => {
   }
 });
 
-// GET /api/user → get authenticated user's data
-router.get('/api/user', async (req, res) => {
-  const { accessToken } = req.query;
 
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
-  const pool = require('../db/config');
-  const { getUserFromToken } = require('../utils/userHelpers');
-
-  try {
-    const user = await getUserFromToken(accessToken);
-
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid or expired token' });
-    }
-
-    // Get user's post statistics
-    const statsResult = await pool.query(
-      `SELECT 
-        COUNT(*) as total_posts,
-        COUNT(*) FILTER (WHERE status = 'posted') as posted_count,
-        COUNT(*) FILTER (WHERE status = 'draft') as draft_count,
-        COUNT(*) FILTER (WHERE status = 'scheduled') as scheduled_count,
-        COUNT(*) FILTER (WHERE status = 'failed') as failed_count
-      FROM posts
-      WHERE account_id = $1`,
-      [user.account_id]
-    );
-
-    const stats = statsResult.rows[0] || {
-      total_posts: 0,
-      posted_count: 0,
-      draft_count: 0,
-      scheduled_count: 0,
-      failed_count: 0
-    };
-
-    // Return user data with statistics
-    res.json({
-      user: {
-        id: user.user_id,
-        name: user.user_name,
-        email: user.email,
-        created_at: user.user_created_at,
-        x_account: {
-          id: user.account_id,
-          username: user.platform_username,
-          x_user_id: user.platform_user_id
-        },
-        stats: {
-          total: parseInt(stats.total_posts),
-          posted: parseInt(stats.posted_count),
-          draft: parseInt(stats.draft_count),
-          scheduled: parseInt(stats.scheduled_count),
-          failed: parseInt(stats.failed_count)
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Error fetching user data:', error);
-    res.status(500).json({ error: 'Failed to fetch user data' });
-  }
-});
 
 // GET /api/posts → get all posts for authenticated user
 router.get('/api/posts', async (req, res) => {
@@ -717,4 +658,7 @@ router.patch('/api/posts/:id', async (req, res) => {
 });
 
 
+//Dashboard
+// GET /api/user → get authenticated user's data (Profile & Stats)
+router.get('/user', authMiddleware, Dashboard.getDashboardData);
 module.exports = router;

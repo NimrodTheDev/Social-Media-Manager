@@ -15,6 +15,41 @@ const LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
 
 const X_AUTH_URL = 'https://twitter.com/i/oauth2/authorize';
 
+const SUPPORTED_PLATFORMS = [
+    {
+        id: 'x',
+        name: '𝕏 (Twitter)',
+        color: '#e7e9ea',
+        icon: '𝕏',
+        enabled: true,
+        description: 'Connect your 𝕏 account to post tweets and threads.'
+    },
+    {
+        id: 'linkedin',
+        name: 'LinkedIn',
+        color: '#0a66c2',
+        icon: 'in',
+        enabled: true,
+        description: 'Connect your LinkedIn profile to share professional updates.'
+    },
+    {
+        id: 'instagram',
+        name: 'Instagram',
+        color: '#e1306c',
+        icon: '📸',
+        enabled: false,
+        description: 'Instagram posting coming soon!'
+    },
+    {
+        id: 'facebook',
+        name: 'Facebook',
+        color: '#1877f2',
+        icon: 'f',
+        enabled: false,
+        description: 'Facebook posting coming soon!'
+    }
+];
+
 const Social = {
     connectX: async (req, res) => {
         try {
@@ -308,6 +343,29 @@ const Social = {
             res.status(200).json(makeResponse(true, 'Account disconnected successfully'));
         } catch (error) {
             console.error('Error disconnecting account:', error);
+            res.status(500).json(makeResponse(false, 'Internal server error'));
+        }
+    },
+    getAllSocialAccounts: async (req, res) => {
+        try {
+            // This returns the list of platforms the APP supports/allows
+            const userId = req.user.id;
+            const accounts = await pool.query(
+                'SELECT id, platform, platform_user_id, platform_username, is_active, created_at, updated_at, token_expires_at, access_token  FROM social_accounts WHERE user_id = $1',
+                [userId]
+            );
+            const supportedPlatforms = SUPPORTED_PLATFORMS.map(platform => {
+                const account = accounts.rows.find(account => account.platform === platform.id);
+                return {
+                    ...platform,
+                    connected: !!account,
+                    accountId: account ? account.id : null,
+                    handle: account ? account.platform_username : null
+                };
+            });
+            res.status(200).json(makeResponse(true, 'Supported platforms fetched successfully', supportedPlatforms));
+        } catch (error) {
+            console.error('Error fetching all social accounts:', error);
             res.status(500).json(makeResponse(false, 'Internal server error'));
         }
     }

@@ -18,6 +18,14 @@ const routes = [
       { path: 'posts/create', name: 'CreatePost', component: () => import('../views/CreatePost.vue') },
       { path: 'posts/drafts', name: 'Drafts', component: () => import('../views/Drafts.vue') },
       { path: 'posts/scheduled', name: 'Scheduled', component: () => import('../views/Scheduled.vue') },
+      { path: 'media/library', name: 'MediaLibrary', component: () => import('../views/MediaLibrary.vue') },
+      { path: 'media/image-editor', name: 'ImageEditor', component: () => import('../views/ImageEditor.vue') },
+      { path: 'media/video-editor', name: 'VideoEditor', component: () => import('../views/VideoEditor.vue') },
+      { path: 'media/audio', name: 'AudioStudio', component: () => import('../views/AudioStudio.vue') },
+      { path: 'media/meme', name: 'MemeGenerator', component: () => import('../views/MemeGenerator.vue') },
+      { path: 'media/voice-over', name: 'VoiceOver', component: () => import('../views/VoiceOver.vue') },
+      { path: 'platforms', name: 'Platforms', component: () => import('../views/Platforms.vue') },
+      { path: 'settings', name: 'Settings', component: () => import('../views/Settings.vue') },
     ]
   },
 ]

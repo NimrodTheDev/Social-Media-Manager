@@ -4,30 +4,60 @@ import { useRouter } from 'vue-router'
 import { useNavigation } from '../composables/useNavigation'
 import { useConnectSocial } from '../composables/useConnectSocial'
 import { onMounted, ref } from 'vue'
+import { api } from '../api'
+
 const router = useRouter()
 const { user } = useAuth()
 const { navObject } = useNavigation()
 const { connectSocial, connectedAccounts, disconnectSocial } = useConnectSocial()
 
 const accounts = ref([])
+const stats = ref({ posted: 0, drafted: 0, scheduled: 0 })
+const dashboardPosts = ref([])
+const loading = ref(true)
+
 const fetchAccounts = async () => {
-    accounts.value = await connectedAccounts()
+    accounts.value = await connectedAccounts() || []
 }
 
-onMounted(async()=>{
-    await fetchAccounts()
+const fetchDashboardData = async () => {
+    loading.value = true
+    try {
+        const res = await api('/user')
+        if (res.success && res.user) {
+            stats.value = res.user.stats || { posted: 0, drafted: 0, scheduled: 0 }
+            dashboardPosts.value = res.user.recentPosts || []
+        }
+    } catch (e) {
+        console.error('Error fetching dashboard data:', e)
+    } finally {
+        loading.value = false
+    }
+}
+
+onMounted(async () => {
+    await Promise.all([
+        fetchAccounts(),
+        fetchDashboardData()
+    ])
 })
 
 const platforms = [
-  { id: 'x', name: 'X (Twitter)', icon: '𝕏', connected: false, color: '#e7e9ea', bg: '#101014' },
-  { id: 'linkedin', name: 'LinkedIn', icon: 'in', connected: false, color: '#fff', bg: '#0077b5' },
-  { id: 'instagram', name: 'Instagram', icon: 'ig', connected: false, color: '#fff', bg: 'linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%)' },
-  { id: 'tiktok', name: 'TikTok', icon: '♪', connected: false, color: '#fff', bg: '#111111', tiktok: true },
-  { id: 'facebook', name: 'Facebook', icon: 'f', connected: false, color: '#fff', bg: '#1877f2' }
+  { id: 'x', name: 'X (Twitter)', icon: '𝕏', color: '#e7e9ea', bg: '#101014' },
+  { id: 'linkedin', name: 'LinkedIn', icon: 'in', color: '#0a66c2', bg: '#004182' },
 ]
 
 const findConnected = (platformId) => {
     return accounts.value.find(account => account.platform === platformId)
+}
+
+const connectPlatform = (platformId) => {
+    connectSocial(platformId)
+}
+
+const disconnectPlatform = async (id) => {
+    await disconnectSocial(id)
+    await fetchAccounts()
 }
 
 const formatDate = (dateString) => {
@@ -41,391 +71,444 @@ const formatDate = (dateString) => {
   }).format(date)
 }
 
-const createPost = () => {
-  router.push(navObject.createPost.path)
+const getStatusClass = (status) => {
+    if (status === 'posted') return 'published'
+    return status // scheduled, draft, etc.
 }
 
-const connectPlatform = (platformId) => {
-  connectSocial(platformId)
-}
-const disconnectPlatform = async (id) => {
-  await disconnectSocial(id)
-  await fetchAccounts() // Refresh the list after disconnecting
+const getPlatformColor = (platformId) => {
+    const p = platforms.find(pl => pl.id === platformId)
+    return p ? p.color : '#fff'
 }
 </script>
 
 <template>
   <div class="dashboard">
-    <header class="dash-header">
-      <div class="header-content">
-        <h1>Dashboard</h1>
-        <p class="welcome">Welcome back, <span class="highlight">{{ user?.name || 'User' }}</span> 👋</p>
+    <div class="dash-header">
+      <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-sub">Welcome back, {{ user?.name || 'User' }}! Here's your overview.</p>
       </div>
-      <button class="btn primary new-post-btn" @click="createPost">+ Create Post</button>
-    </header>
+      <button class="btn btn-primary" @click="router.push('/app/posts/create')">
+        ✦ Create Post
+      </button>
+    </div>
 
-    <div class="grid-layout">
-      <!-- Stats Sidebar -->
-      <section class="stats-section">
-        <h2 class="section-title">Overview</h2>
-        <div class="cards">
-          <div class="stat-card">
-            <div class="icon-wrap badge-blue">📝</div>
-            <div class="stat-info">
-              <span class="value">0</span>
-              <span class="label">Total Posts</span>
+    <!-- Stats Grid -->
+    <div class="stats-grid">
+      <div class="card stat-card">
+        <div class="stat-label">Posted</div>
+        <div class="stat-value" style="color: #22c55e">{{ stats.posted }}</div>
+        <div class="stat-delta">Lifetime published</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-label">Scheduled</div>
+        <div class="stat-value" style="color: #f59e0b">{{ stats.scheduled }}</div>
+        <div class="stat-delta">To be published soon</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-label">Drafted</div>
+        <div class="stat-value" style="color: var(--brand-primary)">{{ stats.drafted }}</div>
+        <div class="stat-delta">Awaiting completion</div>
+      </div>
+    </div>
+
+    <div class="main-grid">
+      <!-- Left Column: Recent Activity -->
+      <div class="card activity-card">
+        <div class="card-header-flex">
+          <h2 class="section-title">Recent Activity</h2>
+          <button class="text-btn" @click="router.push('/app/posts')">View all</button>
+        </div>
+        
+        <div class="activity-list">
+          <div v-for="post in dashboardPosts" :key="post.id" class="activity-item">
+            <div class="item-icon">
+              {{ post.status === 'posted' ? '📸' : '📅' }}
+            </div>
+            <div class="item-info">
+              <div class="item-title">{{ post.content.substring(0, 50) }}{{ post.content.length > 50 ? '...' : '' }}</div>
+              <div class="item-platforms">
+                <span class="p-badge" :style="{ borderColor: getPlatformColor(post.platform) + '44', color: getPlatformColor(post.platform) }">
+                  {{ post.platform === 'x' ? 'X' : post.platform.charAt(0).toUpperCase() + post.platform.slice(1) }}
+                </span>
+              </div>
+            </div>
+            <div class="item-status">
+              <div class="status-tag" :class="getStatusClass(post.status)">{{ post.status === 'posted' ? 'published' : post.status }}</div>
+              <div class="status-time">{{ formatDate(post.posted_at || post.scheduled_at || post.created_at) }}</div>
             </div>
           </div>
-          <div class="stat-card">
-            <div class="icon-wrap badge-orange">⏱️</div>
-            <div class="stat-info">
-              <span class="value">0</span>
-              <span class="label">Scheduled</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="icon-wrap badge-gray">📄</div>
-            <div class="stat-info">
-              <span class="value">0</span>
-              <span class="label">Drafts</span>
-            </div>
+          <div v-if="dashboardPosts.length === 0" class="empty-state">
+            No recent activity to show.
           </div>
         </div>
-      </section>
+      </div>
 
-
-      <!-- Platforms Area -->
-      <section class="platforms-section">
-        <h2 class="section-title">Connected Accounts</h2>
-        <p class="section-desc">Link your social media profiles to start publishing and scheduling content.</p>
-        
-        <div class="platforms-grid">
-          <div 
-            v-for="platform in platforms" 
-            :key="platform.id"
-            class="platform-card"
-          >
-            <div class="platform-left">
-              <div 
-                class="platform-logo" 
-                :class="{ 'tiktok-logo': platform.tiktok }"
-                :style="{ background: platform.bg, color: platform.color }"
-              >
-                {{ platform.icon }}
-              </div>
-              <div class="platform-details">
-                <h3>{{ platform.name }}</h3>
-                <div v-if="findConnected(platform.id)" class="connection-info">
-                  <p class="status connected">Connected as @{{ findConnected(platform.id).platform_username }}</p>
-                  <p class="expiry">Expires: {{ formatDate(findConnected(platform.id).token_expires_at) }}</p>
-                </div>
-                <p v-else class="status disconnected">Not connected</p>
-              </div>
-            </div>
-            
-            <button class="btn connect-btn" @click="findConnected(platform.id) ? disconnectPlatform(findConnected(platform.id).id) : connectPlatform(platform.id)">
-              {{ findConnected(platform.id) ? 'Disconnect' : 'Connect' }}
+      <!-- Right Column: Studio & Platforms -->
+      <div class="side-panel">
+        <div class="card tools-card">
+          <h2 class="sub-title">Quick Studio</h2>
+          <div class="studio-buttons">
+            <button @click="router.push('/app/media/image-editor')" class="studio-btn">
+              <span class="icon">🖼</span> Image Editor
+            </button>
+            <button @click="router.push('/app/media/video-editor')" class="studio-btn">
+              <span class="icon">▶</span> Video Editor
+            </button>
+            <button @click="router.push('/app/media/meme')" class="studio-btn">
+              <span class="icon">😂</span> Meme Generator
             </button>
           </div>
         </div>
-      </section>
+
+        <div class="card platforms-card">
+          <h2 class="sub-title">Connected Platforms</h2>
+          <div class="platform-list">
+            <div v-for="p in platforms" :key="p.id" class="platform-item">
+              <div class="p-info">
+                <div class="p-icon" :style="{ background: p.bg, color: p.color }">{{ p.icon }}</div>
+                <div class="p-name">
+                  <div>{{ p.name }}</div>
+                  <div v-if="findConnected(p.id)" class="p-user">@{{ findConnected(p.id).platform_username }}</div>
+                </div>
+              </div>
+              <div class="p-actions">
+                <div v-if="findConnected(p.id)" class="p-connected">
+                  <span class="status-dot connected"></span>
+                  <button class="disconnect-btn" @click="disconnectPlatform(findConnected(p.id).id)">✕</button>
+                </div>
+                <button 
+                  v-else
+                  class="connect-btn" 
+                  @click="connectPlatform(p.id)"
+                >
+                  Connect
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .dashboard {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding-bottom: 3rem;
-  animation: fadeIn 0.4s ease-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
 }
 
 .dash-header {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 2rem;
-  gap: 1rem;
 }
 
-@media (min-width: 600px) {
-  .dash-header {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-  }
-}
-
-.dash-header h1 {
-  font-size: 1.75rem;
+.page-title {
+  font-size: 26px;
   font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.5px;
+}
+
+.page-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.btn-primary {
+  background: var(--brand-gradient);
   color: #fff;
-  margin: 0 0 0.25rem;
-  letter-spacing: -0.02em;
-}
-
-@media (min-width: 600px) {
-  .dash-header h1 {
-    font-size: 2rem;
-  }
-}
-
-.welcome {
-  color: #a0a4a8;
-  font-size: 1rem;
-  margin: 0;
-}
-
-@media (min-width: 600px) {
-  .welcome {
-    font-size: 1.1rem;
-  }
-}
-
-.highlight {
-  color: #fff;
-  font-weight: 500;
-}
-
-.new-post-btn {
-  padding: 0.8rem 1.5rem;
-  border-radius: 99px;
+  padding: 10px 22px;
+  border-radius: 12px;
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(29, 155, 240, 0.3);
-  transition: all 0.2s;
+  font-size: 14px;
   border: none;
-  background: #1d9bf0;
-  color: #fff;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
   cursor: pointer;
-  width: 100%;
 }
 
-@media (min-width: 600px) {
-  .new-post-btn {
-    width: auto;
-  }
-}
-
-.new-post-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(29, 155, 240, 0.4);
-}
-
-.grid-layout {
+/* Stats */
+.stats-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
 }
 
-@media (min-width: 900px) {
-  .grid-layout {
-    grid-template-columns: 320px 1fr;
-    gap: 3rem;
-  }
-}
-
-.section-title {
-  font-size: 1.2rem;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 0.5rem;
-}
-
-.section-desc {
-  color: #71767b;
-  font-size: 0.95rem;
-  margin-bottom: 1.5rem;
-}
-
-/* Stats Cards */
-.cards {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-@media (min-width: 600px) and (max-width: 899px) {
-  .cards {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-  .stat-card {
-    flex: 1;
-    min-width: 180px;
-  }
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
 }
 
 .stat-card {
-  background: rgba(30, 30, 36, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
-  padding: 1.25rem;
+  padding: 20px;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -1px;
+}
+
+.stat-delta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.stat-delta.up { color: #22c55e; }
+
+/* Main Grid */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-header-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--brand-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.activity-card {
+  padding: 24px;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.activity-item {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
-  transition: transform 0.2s, background 0.2s;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
 }
 
-.stat-card:hover {
-  background: rgba(30, 30, 36, 0.9);
-  transform: translateY(-2px);
+.activity-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
-.icon-wrap {
-  width: 48px;
-  height: 48px;
+.item-icon {
+  width: 44px;
+  height: 44px;
+  background: var(--bg-deep);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
+  font-size: 18px;
 }
 
-.badge-blue { background: rgba(29, 155, 240, 0.15); }
-.badge-orange { background: rgba(245, 124, 0, 0.15); }
-.badge-gray { background: rgba(113, 118, 123, 0.15); }
+.item-info { flex: 1; }
 
-.stat-info {
+.item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.p-badge {
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-right: 6px;
+}
+
+.item-status { text-align: right; }
+
+.status-tag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.status-tag.published { color: #22c55e; }
+.status-tag.scheduled { color: #f59e0b; }
+
+.status-time {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Side Panel */
+.side-panel {
   display: flex;
   flex-direction: column;
+  gap: 24px;
 }
 
-.stat-info .value {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.2;
+.tools-card, .platforms-card {
+  padding: 20px;
 }
 
-.stat-info .label {
-  color: #71767b;
-  font-size: 0.9rem;
-  font-weight: 500;
+.sub-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: var(--text-main);
 }
 
-/* Platforms Grid */
-.platforms-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.25rem;
-}
-
-@media (min-width: 600px) {
-  .platforms-grid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  }
-}
-
-.platform-card {
-  background: linear-gradient(145deg, #1a1a20, #16161a);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 16px;
-  padding: 1.25rem;
+.studio-buttons {
   display: flex;
-  flex-direction: column; /* Stack on mobile by default */
-  gap: 1.25rem;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.studio-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
-@media (min-width: 480px) {
-  .platform-card {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-  }
+.studio-btn:hover {
+  border-color: var(--brand-primary);
+  color: var(--text-main);
+  background: rgba(99, 102, 241, 0.05);
 }
 
-.platform-card:hover {
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+.platform-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.platform-left {
+.platform-item {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  justify-content: space-between;
 }
 
-.platform-logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+.p-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.p-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
-  font-weight: bold;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  flex-shrink: 0;
+  font-size: 16px;
 }
 
-.tiktok-logo {
-  text-shadow: 2px 0 0 #ff0050, -2px 0 0 #00f2fe;
-}
-
-.platform-details h3 {
-  color: #e7e9ea;
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0 0 0.2rem;
-}
-
-.platform-details .status {
-  font-size: 0.8rem;
-  margin: 0;
+.p-name {
+  font-size: 13px;
   font-weight: 500;
+  color: var(--text-main);
 }
 
-.status.disconnected {
-  color: #71767b;
+.p-user {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
-.status.connected {
-  color: #00ba7c;
-}
-
-.connection-info {
+.p-actions {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  align-items: center;
 }
 
-.expiry {
-  font-size: 0.75rem;
-  color: #71767b;
-  font-weight: 400;
+.p-connected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dark);
+}
+
+.status-dot.connected { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
+
+.disconnect-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.disconnect-btn:hover { color: #ef4444; }
 
 .connect-btn {
-  background: #eff3f4;
-  color: #0f1419;
-  border: none;
-  padding: 0.7rem 1.25rem;
-  border-radius: 99px;
-  font-size: 0.85rem;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-light);
+  color: var(--text-main);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  white-space: nowrap;
-  width: 100%; /* Full width on mobile */
-}
-
-@media (min-width: 480px) {
-  .connect-btn {
-    width: auto;
-    padding: 0.5rem 1rem;
-  }
 }
 
 .connect-btn:hover {
-  background: #d7dbdc;
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: #fff;
 }
 </style>

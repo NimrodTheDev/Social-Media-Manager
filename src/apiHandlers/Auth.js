@@ -79,19 +79,102 @@ const Auth = {
             return res.status(500).json(makeResponse(false, 'Internal server error'));
         }
     },
+    requestVerificationCode: async (req, res) => {
+        try {
+            let { email } = req.body;
+            if (!email) {
+                return res.status(400).json(makeResponse(false, 'Email is required'));
+            }
+
+            email = email.toLowerCase().trim();
+
+            // Basic regex for email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return res.status(400).json(makeResponse(false, 'Invalid email format'));
+            }
+
+            // Check if user already exists
+            const existingUser = await pool.query(
+                'SELECT id FROM users WHERE email = $1',
+                [email]
+            );
+
+            if (existingUser.rows.length > 0) {
+                return res.status(409).json(makeResponse(false, 'Email already registered'));
+            }
+
+            // Generate 6-digit code
+            const code = Math.floor(100000 + Math.random() * 900000).toString();
+            const codeHash = await bcrypt.hash(code, 10);
+            const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+            // Save to email_verifications (upsert if exists)
+            await pool.query(
+                `INSERT INTO email_verifications (email, code_hash, expires_at)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (email) DO UPDATE 
+                 SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at, created_at = NOW()`,
+                [email, codeHash, expiresAt]
+            );
+
+            // Send email
+            if (isConfigured) {
+                const result = await sendHtml(
+                    email,
+                    'Verify your email',
+                    `<p>Your verification code is: <strong>${code}</strong></p><p>This code will expire in 15 minutes.</p>`
+                );
+
+                if (!result.success) {
+                    return res.status(500).json(makeResponse(false, 'Failed to send verification email'));
+                }
+            } else {
+                // In dev mode without email configured, we log the code for testing
+                console.log(`[DEV] Verification code for ${email}: ${code}`);
+            }
+
+            return res.status(200).json(makeResponse(true, 'Verification code sent successfully'));
+
+        } catch (error) {
+            console.error('Error requesting verification code:', error);
+            return res.status(500).json(makeResponse(false, 'Internal server error'));
+        }
+    },
     signUp: async (req, res) => {
         try {
-            let { email, password, name } = req.body;
+            let { email, password, name, code } = req.body;
 
             // Basic validation
-            if (!email || !password || !name) {
+            if (!email || !password || !name || !code) {
                 return res.status(400).json(
-                    makeResponse(false, 'All fields are required')
+                    makeResponse(false, 'All fields are required, including verification code')
                 );
             }
 
             // Normalize email
             email = email.toLowerCase().trim();
+
+            // Verify code
+            const verification = await pool.query(
+                'SELECT * FROM email_verifications WHERE email = $1',
+                [email]
+            );
+
+            if (verification.rows.length === 0) {
+                return res.status(400).json(makeResponse(false, 'No verification code found for this email'));
+            }
+
+            const { code_hash, expires_at } = verification.rows[0];
+
+            if (new Date() > new Date(expires_at)) {
+                return res.status(400).json(makeResponse(false, 'Verification code has expired'));
+            }
+
+            const isValidCode = await bcrypt.compare(code, code_hash);
+            if (!isValidCode) {
+                return res.status(400).json(makeResponse(false, 'Invalid verification code'));
+            }
 
             // Password strength check
             if (password.length < 8) {
@@ -100,7 +183,7 @@ const Auth = {
                 );
             }
 
-            // Check if user already exists
+            // Check if user already exists (double check just in case)
             const existingUser = await pool.query(
                 'SELECT id FROM users WHERE email = $1',
                 [email]
@@ -113,7 +196,7 @@ const Auth = {
 
             if (existingName.rows.length > 0) {
                 return res.status(409).json(
-                    makeResponse(false, 'name already registered')
+                    makeResponse(false, 'Name already registered')
                 );
             }
 
@@ -126,64 +209,61 @@ const Auth = {
             // Hash password
             const hashedPassword = await bcrypt.hash(password, 12);
 
+            // Insert user
+            const result = await pool.query(
+                `INSERT INTO users (email, password_hash, username)
+                VALUES ($1, $2, $3)
+                RETURNING id, email, username, created_at`,
+                [email, hashedPassword, name]
+            );
+            
+            const user = result.rows[0];
 
+            // Delete verification record
+            await pool.query('DELETE FROM email_verifications WHERE email = $1', [email]);
 
-            // Send welcome email (non-blocking; signup succeeds even if email fails)
+            // Send welcome email (non-blocking) - we can be more relaxed here since email was already verified
             if (isConfigured) {
-                try {
-                    await sendHtml(
-                        email,
-                        'Welcome to Social Media Manager',
-                        `<p>Hi ${escapeHtml(name)},</p><p>Your account is set up. You can log in and start managing your posts.</p><p>— The team</p>`
-                    );
-
-                    // Insert user
-                    const result = await pool.query(
-                        `INSERT INTO users (email, password_hash, username)
-                        VALUES ($1, $2, $3)
-                        RETURNING id, email, username, created_at`,
-                        [email, hashedPassword, name]
-                    )
-                    const user = result.rows[0];
-                    // Auto-login after signup - generate tokens
-                    const payload = {
-                        id: user.id,
-                        email: user.email,
-                        name: user.username,
-                    };
-                    const accessToken = jwt.sign(
-                        payload,
-                        process.env.JWT_SECRET,
-                        { expiresIn: '15m' }
-                    );
-                    const refreshToken = jwt.sign(
-                        { id: user.id },
-                        process.env.JWT_REFRESH_SECRET,
-                        { expiresIn: '7d' }
-                    );
-
-                    await pool.query(
-                        'UPDATE users SET refresh_token = $1 WHERE id = $2',
-                        [refreshToken, user.id]
-                    );
-                    res.cookie('refreshToken', refreshToken, {
-                        httpOnly: true,
-                        secure: false,
-                        sameSite: 'strict'
-                    });
-                    return res.status(201).json(
-                        makeResponse(true, 'User created successfully', {
-                            token: accessToken,
-                            ...payload
-                        })
-                    );
-                } catch (error) {
-                    console.error('Error sending welcome email:', error);
-                    return res.status(500).json(
-                        makeResponse(false, 'Failed to send welcome email')
-                    );
-                }
+                sendHtml(
+                    email,
+                    'Welcome to Social Media Manager',
+                    `<p>Hi ${escapeHtml(name)},</p><p>Your account is set up. You can log in and start managing your posts.</p><p>— The team</p>`
+                ).catch(err => console.error('Error sending welcome email:', err));
             }
+
+            // Auto-login after signup - generate tokens
+            const payload = {
+                id: user.id,
+                email: user.email,
+                name: user.username,
+            };
+            const accessToken = jwt.sign(
+                payload,
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+            const refreshToken = jwt.sign(
+                { id: user.id },
+                process.env.JWT_REFRESH_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            await pool.query(
+                'UPDATE users SET refresh_token = $1 WHERE id = $2',
+                [refreshToken, user.id]
+            );
+            res.cookie('refreshToken', refreshToken, {
+                httpOnly: true,
+                secure: false,
+                sameSite: 'strict'
+            });
+            return res.status(201).json(
+                makeResponse(true, 'User created successfully', {
+                    token: accessToken,
+                    ...payload
+                })
+            );
+
         } catch (error) {
             console.error('Error signing up:', error);
             return res.status(500).json(

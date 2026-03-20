@@ -1,17 +1,38 @@
-// We don't even need Vue's ref() since this array is static!
 export const navItems = [
-    { path: '/app/dashboard', label: 'Dashboard', icon: '◉' },
-    { path: '/app/posts/create', label: 'Create post', icon: '+' },
-    { path: '/app/posts/drafts', label: 'Drafts', icon: '◇' },
-    { path: '/app/posts/scheduled', label: 'Scheduled', icon: '◷' },
-]
+    { id: 'dashboard', label: 'Dashboard', icon: '⊞', path: '/app/dashboard' },
+    { id: 'create', label: 'Create Post', icon: '✦', path: '/app/posts/create', highlight: true },
+    {
+        id: 'posts',
+        label: 'Posts',
+        icon: '◧',
+        children: [
+            { id: 'drafts', label: 'Drafts', path: '/app/posts/drafts' },
+            { id: 'scheduled', label: 'Scheduled', path: '/app/posts/scheduled' },
+        ]
+    },
+    {
+        id: 'media',
+        label: 'Media Studio',
+        icon: '◈',
+        children: [
+            { id: 'library', label: 'Library', path: '/app/media/library' },
+            { id: 'image-editor', label: 'Image Editor', path: '/app/media/image-editor' },
+            { id: 'video-editor', label: 'Video Editor', path: '/app/media/video-editor' },
+            { id: 'audio', label: 'Audio Studio', path: '/app/media/audio' },
+            { id: 'meme', label: 'Meme Generator', path: '/app/media/meme' },
+            { id: 'voice-over', label: 'Voice Over', path: '/app/media/voice-over' },
+        ]
+    },
+    { id: 'platforms', label: 'Platforms', icon: '⬡', path: '/app/platforms' },
+    { id: 'settings', label: 'Settings', icon: '⚙', path: '/app/settings' },
+];
 
 export const navObject = {
-    dashboard: { path: '/app/dashboard', label: 'Dashboard', icon: '◉' },
-    createPost: { path: '/app/posts/create', label: 'Create post', icon: '+' },
-    drafts: { path: '/app/posts/drafts', label: 'Drafts', icon: '◇' },
-    scheduled: { path: '/app/posts/scheduled', label: 'Scheduled', icon: '◷' },
-}
+    dashboard: { id: 'dashboard', label: 'Dashboard', icon: '⊞', path: '/app/dashboard' },
+    createPost: { id: 'create', label: 'Create Post', icon: '✦', path: '/app/posts/create' },
+    drafts: { id: 'drafts', label: 'Drafts', path: '/app/posts/drafts' },
+    scheduled: { id: 'scheduled', label: 'Scheduled', path: '/app/posts/scheduled' },
+};
 
 export function useNavigation() {
     return {

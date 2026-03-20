@@ -17,10 +17,15 @@ const useConnectSocial = () => {
         });
         return response.data;
     }
+    const getSupportedPlatforms = async () => {
+        const response = await api(`/platforms`);
+        return response.data;
+    }
     return {
         connectSocial,
         connectedAccounts,
-        disconnectSocial
+        disconnectSocial,
+        getSupportedPlatforms
     }
 }
 
