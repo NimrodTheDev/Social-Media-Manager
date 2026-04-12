@@ -2,13 +2,12 @@
 import { ref, onMounted } from 'vue'
 import { useAuth } from '../composables/useAuth'
 
-const { user } = useAuth()
+const { user, setMe } = useAuth()
 const activeTab = ref('general')
 
 const profileForm = ref({
   username: '',
   email: '',
-  bio: 'Social Media Enthusiast & Content Creator'
 })
 
 const preferences = ref({
@@ -19,10 +18,9 @@ const preferences = ref({
 
 const notifications = ref({
   failedPost: true,
-  scheduledPost: true,
-  weeklyDigest: false,
-  newFollower: true
+  successPost: true,
 })
+const avatarPath = ref(null)
 
 const timezones = [
   'UTC -08:00 (Pacific Time)',
@@ -38,11 +36,18 @@ onMounted(() => {
   if (user.value) {
     profileForm.value.username = user.value.name || user.value.username || ''
     profileForm.value.email = user.value.email || ''
+    notifications.value.failedPost = user.value.notify_on_post_failure
+    notifications.value.successPost = user.value.notify_on_post_success
+    avatarPath.value = user.value?.avatar
   }
 })
 
 const handleSave = () => {
-  alert('Settings saved successfully!')
+  setMe({
+    username: profileForm.value.username,
+    notify_on_post_failure: notifications.value.failedPost,
+    notify_on_post_success: notifications.value.successPost,
+  })
 }
 </script>
 
@@ -57,17 +62,17 @@ const handleSave = () => {
       <!-- Sidebar Navigation -->
       <aside class="settings-sidebar">
         <button 
-          v-for="tab in ['general', 'preferences', 'notifications', 'security']" 
+          v-for="tab in ['general', 'notifications', 'security']" 
           :key="tab"
           class="nav-item"
           :class="{ active: activeTab === tab }"
           @click="activeTab = tab"
         >
           <span class="nav-icon">
-            <template v-if="tab === 'general'">👤</template>
-            <template v-if="tab === 'preferences'">⚙️</template>
-            <template v-if="tab === 'notifications'">🔔</template>
-            <template v-if="tab === 'security'">🔒</template>
+            <div v-if="tab === 'general'">👤</div>
+            <div v-if="tab === 'preferences'">⚙️</div>
+            <div v-if="tab === 'notifications'">🔔</div>
+            <div v-if="tab === 'security'">🔒</div>
           </span>
           <span class="nav-label">{{ tab.charAt(0).toUpperCase() + tab.slice(1) }}</span>
         </button>
@@ -79,7 +84,7 @@ const handleSave = () => {
         <section v-if="activeTab === 'general'" class="settings-section">
           <h2 class="section-title">General Settings</h2>
           <div class="profile-preview">
-            <div class="avatar-placeholder">{{ profileForm.username.charAt(0) }}</div>
+            <div class="avatar-placeholder">{{ avatar || profileForm.username.charAt(0) }}</div>
             <div class="avatar-actions">
               <button class="btn btn-secondary btn-sm">Change Avatar</button>
               <p class="help-text">JPG, GIF or PNG. Max size of 800K</p>
@@ -93,16 +98,12 @@ const handleSave = () => {
             </div>
             <div class="form-group">
               <label>Email Address</label>
-              <input v-model="profileForm.email" type="email" class="input-field" placeholder="your@email.com">
-            </div>
-            <div class="form-group full-width">
-              <label>Bio</label>
-              <textarea v-model="profileForm.bio" class="input-field textarea" placeholder="A short bio..."></textarea>
+              <input v-model="profileForm.email" type="email" class="input-field" placeholder="your@email.com" disabled>
             </div>
           </div>
         </section>
 
-        <!-- Preferences -->
+        <!-- Preferences
         <section v-if="activeTab === 'preferences'" class="settings-section">
           <h2 class="section-title">App Preferences</h2>
           <div class="form-grid">
@@ -145,6 +146,7 @@ const handleSave = () => {
             </div>
           </div>
         </section>
+         -->
 
         <!-- Notifications -->
         <section v-if="activeTab === 'notifications'" class="settings-section">
@@ -166,11 +168,11 @@ const handleSave = () => {
                 <div class="notif-desc">Receive a confirmation when a post is successfully published.</div>
               </div>
               <label class="switch">
-                <input type="checkbox" v-model="notifications.scheduledPost">
+                <input type="checkbox" v-model="notifications.successPost">
                 <span class="slider"></span>
               </label>
             </div>
-            <div class="notification-item">
+            <!-- <div class="notification-item">
               <div class="notif-info">
                 <div class="notif-title">Weekly Digest</div>
                 <div class="notif-desc">A summary of your weekly social media performance.</div>
@@ -179,7 +181,7 @@ const handleSave = () => {
                 <input type="checkbox" v-model="notifications.weeklyDigest">
                 <span class="slider"></span>
               </label>
-            </div>
+            </div> -->
           </div>
         </section>
 
@@ -194,17 +196,6 @@ const handleSave = () => {
                 <input type="password" class="input-field" placeholder="New password">
               </div>
               <button class="btn btn-secondary mt-2">Update Password</button>
-            </div>
-            <div class="form-group full-width border-top pt-4">
-              <label>Active Sessions</label>
-              <div class="session-item">
-                <div class="session-icon">💻</div>
-                <div class="session-info">
-                  <div class="session-device">MacBook Pro (Chrome) - Current Session</div>
-                  <div class="session-meta">Paris, France • 192.168.1.1</div>
-                </div>
-              </div>
-              <button class="btn btn-ghost btn-sm mt-3">Log out of all other devices</button>
             </div>
           </div>
         </section>
@@ -223,15 +214,25 @@ const handleSave = () => {
 .page-sub { color: var(--text-muted); font-size: 1rem; margin-top: 0.4rem; }
 
 .settings-layout {
-  display: grid;
-  grid-template-columns: 240px 1fr;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 2rem;
   align-items: flex-start;
 }
 
 @media (max-width: 900px) {
-  .settings-layout { grid-template-columns: 1fr; }
-  .settings-sidebar { display: flex; overflow-x: auto; gap: 0.5rem; padding-bottom: 1rem; }
+  .settings-sidebar { 
+    display: flex; 
+    overflow-x: auto; 
+    gap: 0.5rem; 
+    padding-bottom: 1rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .settings-sidebar::-webkit-scrollbar { display: none; }
+  .nav-item { white-space: nowrap; flex-shrink: 0; }
+  .settings-content { padding: 1.5rem; border-radius: 20px; }
 }
 
 .settings-sidebar {
@@ -271,6 +272,8 @@ const handleSave = () => {
   border: 1px solid var(--border-light);
   border-radius: 24px;
   padding: 2.5rem;
+  width: calc(100% - 400px);
+  min-width: 350px;
 }
 
 .settings-section {
@@ -316,18 +319,27 @@ const handleSave = () => {
 }
 
 .form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 1.5rem;
 }
 
 .form-group {
+  flex: 1 1 calc(50% - 0.75rem);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
 }
 
-.form-group.full-width { grid-column: span 2; }
+.form-group.full-width { 
+  flex: 1 1 100%;
+}
+
+@media (max-width: 600px) {
+  .form-group { flex: 1 1 100%; }
+  .profile-preview { flex-direction: column; text-align: center; }
+  .avatar-actions { align-items: center; }
+}
 
 .form-group label {
   font-size: 0.9rem;
@@ -365,6 +377,13 @@ const handleSave = () => {
   display: flex;
   gap: 1.5rem;
   margin-top: 0.5rem;
+}
+
+@media (max-width: 480px) {
+  .theme-selector { flex-direction: column; gap: 1rem; }
+  .password-fields .input-field { flex: 1 1 100%; }
+  .settings-footer { justify-content: stretch; }
+  .settings-footer .btn { width: 100%; }
 }
 
 .theme-option {
@@ -409,10 +428,17 @@ const handleSave = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
   padding: 1.2rem;
   background: var(--bg-deep);
   border-radius: 16px;
   border: 1px solid var(--border-light);
+}
+
+.notif-info {
+  flex: 1;
+  min-width: 200px;
 }
 
 .notif-title {
@@ -428,9 +454,13 @@ const handleSave = () => {
 }
 
 .password-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
+}
+
+.password-fields .input-field {
+  flex: 1 1 calc(50% - 0.5rem);
 }
 
 .session-item {
@@ -481,6 +511,7 @@ const handleSave = () => {
   display: inline-block;
   width: 44px;
   height: 24px;
+  flex-shrink: 0;
 }
 
 .switch input { opacity: 0; width: 0; height: 0; }

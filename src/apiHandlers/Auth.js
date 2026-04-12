@@ -189,16 +189,16 @@ const Auth = {
                 [email]
             );
 
-            const existingName = await pool.query(
-                'SELECT id FROM users WHERE username = $1',
-                [name]
-            );
+            // const existingName = await pool.query(
+            //     'SELECT id FROM users WHERE username = $1',
+            //     [name]
+            // );
 
-            if (existingName.rows.length > 0) {
-                return res.status(409).json(
-                    makeResponse(false, 'Name already registered')
-                );
-            }
+            // if (existingName.rows.length > 0) {
+            //     return res.status(409).json(
+            //         makeResponse(false, 'Name already registered')
+            //     );
+            // }
 
             if (existingUser.rows.length > 0) {
                 return res.status(409).json(
@@ -216,7 +216,7 @@ const Auth = {
                 RETURNING id, email, username, created_at`,
                 [email, hashedPassword, name]
             );
-            
+
             const user = result.rows[0];
 
             // Delete verification record
@@ -416,7 +416,7 @@ const Auth = {
     me: async (req, res) => {
         try {
             const user = await pool.query(
-                'SELECT id, email, username FROM users WHERE id = $1',
+                'SELECT id, email, username, avatar_path, post_failure_notification, post_success_notification FROM users WHERE id = $1',
                 [req.user.id]
             );
             if (user.rows.length === 0) {
@@ -428,7 +428,43 @@ const Auth = {
                 makeResponse(true, 'User found', {
                     id: user.rows[0].id,
                     email: user.rows[0].email,
-                    name: user.rows[0].username
+                    name: user.rows[0].username,
+                    avatar: user.rows[0].avatar_url,
+                    notify_on_post_failure: user.rows[0].post_failure_notification,
+                    notify_on_post_success: user.rows[0].post_success_notification,
+                })
+            );
+        } catch (error) {
+            console.error('Error getting user:', error);
+            return res.status(500).json(
+                makeResponse(false, 'Internal server error')
+            );
+        }
+    },
+    setUser: async (req, res) => {
+        try {
+
+            // const existingName = await pool.query(
+            //     'SELECT 1 FROM users WHERE username = $1',
+            //     [req.body.username]
+            // );
+
+            // if (existingName) {
+            //     return res.status(409).json(makeResponse(false, "Name already exists", {}))
+            // }
+
+            const user = await pool.query(
+                'UPDATE users SET email=COALESCE($1, email), username=COALESCE($2, username), avatar_path=COALESCE($3, avatar_path), post_failure_notification=COALESCE($4, post_failure_notification), post_success_notification=COALESCE($5, post_success_notification) WHERE id = $6 RETURNING *',
+                [req.body.email, req.body.username, req.body.avatar_path, req.body.post_failure_notification, req.body.post_success_notification, req.user.id]
+            );
+            return res.status(200).json(
+                makeResponse(true, 'User editted successfully', {
+                    id: user.rows[0].id,
+                    email: user.rows[0].email,
+                    name: user.rows[0].username,
+                    avatar: user.rows[0].avatar_path,
+                    notify_on_post_failure: user.rows[0].post_failure_notification,
+                    notify_on_post_success: user.rows[0].post_success_notification,
                 })
             );
         } catch (error) {

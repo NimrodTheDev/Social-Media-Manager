@@ -1,10 +1,11 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-const { postToPlatform } = require('../services/postService');
+const { postToPlatform } = require('../services/postServiceX');
 const Auth = require('../apiHandlers/Auth');
 const authMiddleware = require('../middleware/auth');
 const Social = require('../apiHandlers/Social');
+const Posts = require('../apiHandlers/Posts');
 const { makeResponse } = require('../utils/responder');
 const { Dashboard } = require('../apiHandlers/Dashboard');
 
@@ -23,6 +24,7 @@ router.post('/auth/reset-password', Auth.resetPassword);
 router.get('/auth/me', authMiddleware, Auth.me);
 router.post('/auth/refresh', Auth.refresh);
 router.post('/auth/logout', Auth.logout);
+router.put("/auth/setUser", authMiddleware, Auth.setUser)
 
 
 
@@ -64,6 +66,9 @@ router.delete('/disconnect-social/:id', authMiddleware, Social.disconnectSocial)
 // GET /api/platforms → get list of all allowed social media platforms
 router.get('/platforms', authMiddleware, Social.getAllSocialAccounts);
 
+router.post('/save-draft', authMiddleware, Posts.saveToDraft);
+router.post('/post-to-social', authMiddleware, Posts.postToSocial);
+router.get('/posts', authMiddleware, Posts.getPosts);
 
 
 // POST /post → submit tweet text from form and post it to X

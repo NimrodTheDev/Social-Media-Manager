@@ -374,6 +374,8 @@ const isChildActive = (path) => route.path === path
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  max-width: 1500px;
+  margin: 0 auto;
 }
 
 .topnav {

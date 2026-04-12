@@ -108,13 +108,20 @@
 .page-title { font-size: 1.8rem; font-weight: 800; color: var(--text-main); letter-spacing: -0.02em; }
 .page-sub { color: var(--text-muted); font-size: 1rem; margin-top: 0.4rem; }
 
+@media (max-width: 600px) {
+  .page-header { margin-bottom: 1.5rem; }
+  .page-title { font-size: 1.5rem; }
+  .page-sub { font-size: 0.9rem; }
+}
+
 .platforms-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 1.5rem;
 }
 
 .platform-card {
+  flex: 1 1 320px;
   background: var(--bg-surface);
   border: 1px solid var(--border-light);
   border-radius: 24px;
@@ -124,6 +131,18 @@
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .platforms-grid { gap: 1rem; }
+  .platform-card { flex: 1 1 100%; }
+}
+
+@media (max-width: 480px) {
+  .platform-card { padding: 1.2rem; border-radius: 20px; }
+  .platform-icon { width: 48px; height: 48px; font-size: 1.3rem; border-radius: 12px; }
+  .platform-name { font-size: 1.1rem; }
+  .platform-desc { font-size: 0.9rem; margin-bottom: 1.2rem; }
 }
 
 .platform-card:hover {

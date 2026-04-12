@@ -2,6 +2,7 @@ const axios = require('axios');
 
 // X API Configuration
 const X_API_BASE = 'https://api.twitter.com/2';
+const LINKEDIN_API_BASE = 'https://api.linkedin.com/v2';
 
 /**
  * Helper function to safely parse JSON (handles already-parsed JSONB)
@@ -73,7 +74,7 @@ async function postThread(thread, accessToken, media = null) {
 
     const mediaData = safeParseJSON(media);
     const tweetIds = [];
-    
+
     // Post first tweet
     const firstTweetResponse = await axios.post(
       `${X_API_BASE}/tweets`,
@@ -89,7 +90,7 @@ async function postThread(thread, accessToken, media = null) {
       }
     );
     tweetIds.push(firstTweetResponse.data.data.id);
-    
+
     // Post subsequent tweets as replies
     let inReplyToId = firstTweetResponse.data.data.id;
     for (let i = 1; i < threadArray.length; i++) {
@@ -109,7 +110,7 @@ async function postThread(thread, accessToken, media = null) {
       tweetIds.push(replyResponse.data.data.id);
       inReplyToId = replyResponse.data.data.id;
     }
-    
+
     return {
       success: true,
       tweetId: tweetIds[0], // First tweet ID
@@ -199,50 +200,48 @@ async function postQuote(text, quoteTweetId, accessToken, media = null) {
   }
 }
 
-/**
- * Post a post to X API based on its mode
- * @param {Object} post - Post object from database
- * @param {string} accessToken - OAuth access token
- * @returns {Promise<Object>} { success: boolean, tweetId: string, threadIds: Array|null, error: string }
- */
-async function postToPlatform(post, accessToken) {
-  const mode = post.mode || 'single';
 
-  switch (mode) {
-    case 'single':
-      return await postSingleTweet(post.content, accessToken, post.media);
-    
-    case 'thread':
-      return await postThread(post.thread, accessToken, post.media);
-    
-    case 'reply':
-      if (!post.reply_to_id) {
-        return {
-          success: false,
-          error: 'reply_to_id is required for reply mode'
-        };
+
+//LinkedIn
+
+/**
+ * Post a single tweet to LinkedIn API
+ * @param {string} text - Tweet text
+ * @param {string} accessToken - OAuth access token
+ * @param {Array} media - Optional media array
+ * @returns {Promise<Object>} { success: boolean, tweetId: string, error: string }
+ */
+async function postSingleTweet(text, accessToken, media = null) {
+  try {
+    const mediaData = safeParseJSON(media);
+    const tweetResponse = await axios.post(
+      `${X_API_BASE}/tweets`,
+      {
+        text: text,
+        ...(mediaData && { media: { media_ids: mediaData.map(m => m.media_id) } })
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
       }
-      return await postReply(post.content, post.reply_to_id, accessToken, post.media);
-    
-    case 'quote':
-      if (!post.quote_tweet_id) {
-        return {
-          success: false,
-          error: 'quote_tweet_id is required for quote mode'
-        };
-      }
-      return await postQuote(post.content, post.quote_tweet_id, accessToken, post.media);
-    
-    default:
-      return {
-        success: false,
-        error: `Unknown post mode: ${mode}`
-      };
+    );
+    return {
+      success: true,
+      tweetId: tweetResponse.data.data.id,
+      threadIds: null
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.response?.data?.detail || error.message
+    };
   }
 }
 
+
 module.exports = {
-  postToPlatform,
   postSingleTweet,
   postThread,
   postReply,

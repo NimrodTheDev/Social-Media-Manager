@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const pool = require('../db/config');
-const { postToPlatform } = require('../services/postService');
+const { postToPlatform } = require('../services/postServiceX');
 
 // Configuration
 const SCHEDULER_ENABLED = process.env.SCHEDULER_ENABLED !== 'false'; // Default: true
@@ -142,13 +142,13 @@ async function createNextRecurringPost(post) {
   try {
     // Check if we should stop repeating
     const now = new Date();
-    
+
     // Check repeat_until (end date)
     if (post.repeat_until && new Date(post.repeat_until) < now) {
       console.log(`[Scheduler] Post #${post.id}: Recurring post reached end date, stopping`);
       return;
     }
-    
+
     // Check repeat_count (max occurrences)
     if (post.repeat_count && post.repeat_occurrence >= post.repeat_count) {
       console.log(`[Scheduler] Post #${post.id}: Recurring post reached max count (${post.repeat_count}), stopping`);
@@ -252,7 +252,7 @@ function startScheduler() {
   }
 
   console.log(`[Scheduler] Starting scheduler (interval: ${CRON_EXPRESSION})`);
-  
+
   // Run immediately on startup to catch any missed posts
   processScheduledPosts();
 

@@ -234,9 +234,14 @@ const getPlatformColor = (platformId) => {
 
 /* Stats */
 .stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 16px;
+}
+
+.stat-card {
+  flex: 1 1 200px;
+  padding: 20px;
 }
 
 .card {
@@ -275,9 +280,27 @@ const getPlatformColor = (platformId) => {
 
 /* Main Grid */
 .main-grid {
-  display: grid;
-  grid-template-columns: 1fr 340px;
+  display: flex;
+  flex-wrap: wrap;
   gap: 24px;
+}
+
+.activity-card {
+  flex: 1 1 500px;
+  padding: 24px;
+}
+
+.side-panel {
+  flex: 0 0 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .side-panel {
+    flex: 1 1 100%;
+  }
 }
 
 @media (max-width: 1024px) {

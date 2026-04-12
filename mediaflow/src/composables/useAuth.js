@@ -29,7 +29,7 @@ export function useAuth() {
       localStorage.setItem(AUTH_TOKEN_KEY, data.token)
     }
     if (data?.id !== undefined && data?.email !== undefined) {
-      const u = { id: data.id, email: data.email, name: data.name ?? data.username }
+      const u = { id: data.id, email: data.email, name: data.name ?? data.username, notify_on_post_failure: data.notify_on_post_failure, notify_on_post_success: data.notify_on_post_failure }
       user.value = u
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(u))
     }
@@ -105,6 +105,15 @@ export function useAuth() {
     return res
   }
 
+  async function setMe(payload) {
+    const res = await api("/auth/setUser", {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    })
+    if (res.success) {
+      me()
+    }
+  }
   async function logout() {
     const res = await api('/auth/logout', {
       method: 'POST',
@@ -126,5 +135,6 @@ export function useAuth() {
     requestResetPassword,
     resetPassword,
     me,
+    setMe
   }
 }

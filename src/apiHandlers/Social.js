@@ -369,6 +369,6 @@ const Social = {
             res.status(500).json(makeResponse(false, 'Internal server error'));
         }
     }
-}
+};
 
 module.exports = Social;
